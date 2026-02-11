@@ -1,0 +1,23 @@
+# Xbox 360 Xenon QEMU config
+
+[Filepaths]
+Nand = "/home/alexen/qemu360/nand/nand.bin"
+Fuses = "/home/alexen/qemu360/nand/fuses.txt"
+OneBL = "/home/alexen/qemu360/nand/1bl.bin"
+
+[SMC]
+# 0x11 = power button, 0x12 = eject button (XeLL usually needs 0x12)
+PowerOnType = 0x12
+# AV pack reported by SMC_QUERY_AVPACK (xenon-emu default is 0x1f)
+AvPackType = 0x1f
+# UARTSystem: null | print | stdio | socket | vcom
+# print/stdio -> host terminal; socket/vcom currently fall back to null in this QEMU scaffold
+UARTSystem = "print"
+
+[Boot]
+# Keep this off for normal runs; enable when collecting bring-up logs.
+TraceBoot = false
+PrettyPost = true
+Rgh2Patches = true
+# ConsoleRevision: xenon|zephyr|falcon|jasper|trinity|corona|corona4gb|winchester (or 0..7)
+ConsoleRevision = "trinity"

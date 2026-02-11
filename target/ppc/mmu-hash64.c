@@ -47,6 +47,159 @@
 #endif
 
 /*
+ * Xenon (Xbox 360) early-boot compatibility shim:
+ * 1BL programs Xenon-specific PPE_TLB_* SPRs and then executes from EA
+ * 0x0100xxxx. Upstream hash64 MMU does not implement that Xenon mechanism.
+ * Bridge this bootstrap window by mirroring 0x0100xxxx -> 0x0000xxxx once
+ * those SPRs are populated.
+ */
+#define SPR_XENON_PPE_TLB_INDEX 0x3B3
+#define SPR_XENON_PPE_TLB_VPN   0x3B4
+#define SPR_XENON_PPE_TLB_RPN   0x3B5
+#define SPR_XENON_HID6          0x3F9
+
+static inline bool xenon_bootstrap_sprs_present(CPUPPCState *env)
+{
+    return env->spr_cb[SPR_XENON_PPE_TLB_INDEX].name != NULL &&
+           env->spr_cb[SPR_XENON_PPE_TLB_VPN].name != NULL &&
+           env->spr_cb[SPR_XENON_PPE_TLB_RPN].name != NULL;
+}
+
+static bool xenon_soft_tlb_spr_xlate(CPUPPCState *env, vaddr eaddr,
+                                     hwaddr *raddrp, int *psizep, int *protp)
+{
+    uint64_t pte0, pte1, vpn, rpn, page_mask;
+    unsigned page_shift;
+    uint64_t hid6;
+    uint8_t lb, lp, idx;
+
+    if (!xenon_bootstrap_sprs_present(env)) {
+        return false;
+    }
+
+    /*
+     * Keep this shim strictly on the 32-bit alias path used by CD startup.
+     * 64-bit secure-engine windows (0x800002...) must remain on normal flow.
+     */
+    if (eaddr & 0xFFFFFFFF00000000ULL) {
+        return false;
+    }
+    if (eaddr < 0x20000000ULL) {
+        return false;
+    }
+
+    pte0 = env->spr[SPR_XENON_PPE_TLB_VPN];
+    pte1 = env->spr[SPR_XENON_PPE_TLB_RPN];
+    if (!(pte0 & HPTE64_V_VALID)) {
+        return false;
+    }
+
+    /*
+     * Xenon software-managed TLB programming is surfaced through PPE_TLB_*
+     * SPRs. Keep a minimal fast-path from those SPRs so CD can fetch from
+     * 0x8000xxxx before full hash page-table setup is complete.
+     */
+    page_shift = 12;
+    if (pte0 & HPTE64_V_LARGE) {
+        /*
+         * Xenon uses HID6.LB to select large-page size:
+         * idx=0 -> 16MB, idx=1 -> 1MB, idx=2 -> 64KB, idx=3 -> 4KB.
+         * LP selects which LB pair to use.
+         */
+        hid6 = env->spr[SPR_XENON_HID6];
+        lb = (hid6 >> 16) & 0xF;
+        lp = (pte1 >> 12) & 0x1;
+        idx = lp ? (lb & 0x3) : ((lb >> 2) & 0x3);
+        switch (idx) {
+        case 0:
+            page_shift = 24;
+            break;
+        case 1:
+            page_shift = 20;
+            break;
+        case 2:
+            page_shift = 16;
+            break;
+        default:
+            page_shift = 12;
+            break;
+        }
+    }
+    page_mask = (1ULL << page_shift) - 1ULL;
+    vpn = ((pte0 & HPTE64_V_AVPN) << 16) & ~page_mask;
+    rpn = (pte1 & HPTE64_R_RPN) & ~page_mask;
+
+    if ((eaddr & ~page_mask) != vpn) {
+        return false;
+    }
+
+    *raddrp = (hwaddr)(rpn | (eaddr & page_mask));
+    *protp = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
+    *psizep = TARGET_PAGE_BITS;
+    return true;
+}
+
+static bool xenon_bootstrap_tlb_xlate(CPUPPCState *env, vaddr eaddr,
+                                      hwaddr *raddrp, int *psizep, int *protp)
+{
+    if (xenon_soft_tlb_spr_xlate(env, eaddr, raddrp, psizep, protp)) {
+        return true;
+    }
+
+    /*
+     * Xenon secure-boot handoffs execute in fixed 0x04..0x07 windows before
+     * full MMU state is established in QEMU's generic hash64 model.
+     * Model those windows as direct mappings during bootstrap.
+     */
+    if ((eaddr & 0xFF000000ULL) >= 0x04000000ULL &&
+        (eaddr & 0xFF000000ULL) <= 0x07000000ULL) {
+        *raddrp = (hwaddr)(eaddr & 0x3FFFFFFFULL);
+        *protp = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
+        *psizep = TARGET_PAGE_BITS;
+        return true;
+    }
+
+    /*
+     * CD early paging touches low RAM (e.g. 0x0028_0000) while Xenon
+     * software-managed TLB state is still in transition. Provide a bounded
+     * low-memory identity window while PPE_TLB registers are active.
+     */
+    if ((env->spr[SPR_XENON_PPE_TLB_INDEX] |
+         env->spr[SPR_XENON_PPE_TLB_VPN] |
+         env->spr[SPR_XENON_PPE_TLB_RPN]) != 0 &&
+        (eaddr < 0x00800000ULL ||
+         (eaddr >= 0x10000000ULL && eaddr < 0x20000000ULL))) {
+        *raddrp = (hwaddr)eaddr;
+        *protp = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
+        *psizep = TARGET_PAGE_BITS;
+        return true;
+    }
+
+    if ((eaddr & 0xFF000000ULL) != 0x01000000ULL &&
+        (eaddr & 0xFF000000ULL) != 0x02000000ULL &&
+        (eaddr & 0xFF000000ULL) != 0x03000000ULL) {
+        if (eaddr < 0x00002000ULL) {
+            *raddrp = (hwaddr)eaddr;
+            *protp = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
+            *psizep = TARGET_PAGE_BITS;
+            return true;
+        }
+        return false;
+    }
+
+    if ((eaddr & 0xFF000000ULL) == 0x02000000ULL) {
+        *raddrp = (hwaddr)((eaddr & 0x000FFFFFULL) + 0x00010000ULL);
+    } else if ((eaddr & 0xFF000000ULL) == 0x03000000ULL) {
+        *raddrp = (hwaddr)(eaddr & 0x3FFFFFFFULL);
+    } else {
+        *raddrp = (hwaddr)(eaddr & 0x00FFFFFFULL);
+    }
+    *protp = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
+    *psizep = TARGET_PAGE_BITS;
+    return true;
+}
+
+/*
  * SLB handling
  */
 
@@ -272,10 +425,27 @@ int ppc_store_slb(PowerPCCPU *cpu, target_ulong slot,
     }
 
     if (!sps) {
-        error_report("Bad page size encoding in SLB store: slot "TARGET_FMT_lu
-                     " esid 0x"TARGET_FMT_lx" vsid 0x"TARGET_FMT_lx,
-                     slot, esid, vsid);
-        return -1;
+        /*
+         * Xenon CD/MMU setup can use non-standard LLP encodings not modeled
+         * by upstream hash64 page-size tables. Keep forward progress by
+         * downgrading those entries to 4K pages instead of raising PROGRAM.
+         */
+        if ((env->spr[SPR_XENON_PPE_TLB_INDEX] |
+             env->spr[SPR_XENON_PPE_TLB_VPN] |
+             env->spr[SPR_XENON_PPE_TLB_RPN]) != 0 &&
+            cpu->hash64_opts->sps[0].page_shift) {
+            sps = &cpu->hash64_opts->sps[0];
+            qemu_log_mask(LOG_GUEST_ERROR,
+                          "xenon: remapping unknown SLB LLP slot " TARGET_FMT_lu
+                          " esid=0x" TARGET_FMT_lx " vsid=0x" TARGET_FMT_lx
+                          " to 4K page size\n",
+                          slot, esid, vsid);
+        } else {
+            error_report("Bad page size encoding in SLB store: slot " TARGET_FMT_lu
+                         " esid 0x" TARGET_FMT_lx " vsid 0x" TARGET_FMT_lx,
+                         slot, esid, vsid);
+            return -1;
+        }
     }
 
     slb->esid = esid;
@@ -1003,6 +1173,15 @@ bool ppc_hash64_xlate(PowerPCCPU *cpu, vaddr eaddr, MMUAccessType access_type,
      * LPCR "as-is".
      */
 
+    /*
+     * Xenon bootstrap path may execute with translation-on and translation-off
+     * transitions while still addressing 0x01xxxxxx/0x02xxxxxx windows.
+     * Apply this compatibility mapping before generic real-mode handling.
+     */
+    if (xenon_bootstrap_tlb_xlate(env, eaddr, raddrp, psizep, protp)) {
+        return true;
+    }
+
     /* 1. Handle real mode accesses */
     if (mmuidx_real(mmu_idx)) {
         /*
@@ -1021,6 +1200,17 @@ bool ppc_hash64_xlate(PowerPCCPU *cpu, vaddr eaddr, MMUAccessType access_type,
             if (!(eaddr >> 63)) {
                 raddr |= env->spr[SPR_HRMOR];
             }
+        } else if (xenon_bootstrap_sprs_present(env) &&
+                   (env->spr[SPR_LPCR] & LPCR_LPES0)) {
+            /*
+             * Xenon (as modeled by xenon-emu) uses LPCR[LPES0] to enable
+             * real-offset mode in non-HV real addressing:
+             * RA = (EA[22:43] | RMOR[22:43]) || EA[44:63].
+             * Generic hash64 "old-style RMO" bounds checks are incorrect here.
+             */
+            raddr = ((eaddr & 0x3FFFFF00000ULL) |
+                     (env->spr[SPR_RMOR] & 0x3FFFFF00000ULL) |
+                     (eaddr & 0xFFFFFULL));
         } else if (ppc_hash64_use_vrma(env)) {
             /* Emulated VRMA mode */
             vrma = true;
@@ -1289,5 +1479,3 @@ const PPCHash64Options ppc_hash64_opts_POWER7 = {
         },
     }
 };
-
-

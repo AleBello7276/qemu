@@ -102,6 +102,11 @@ config PEGASOS
     select SMBUS_EEPROM
     select VOF
 
+config XBOX360
+    bool
+    default y
+    depends on PPC64
+
 config PREP
     bool
     default y

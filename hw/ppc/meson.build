@@ -89,6 +89,17 @@ ppc_ss.add(when: 'CONFIG_VIRTEX', if_true: files('virtex_ml507.c'))
 ppc_ss.add(when: 'CONFIG_AMIGAONE', if_true: files('amigaone.c'))
 # Pegasos
 ppc_ss.add(when: 'CONFIG_PEGASOS', if_true: files('pegasos.c'))
+# Xbox 360 Xenon
+ppc_ss.add(when: 'CONFIG_XBOX360', if_true: files(
+  'xenon.c',
+  'xenon/config.c',
+  'xenon/exceptions.c',
+  'xenon/iic.c',
+  'xenon/mmio.c',
+  'xenon/postcodes.c',
+  'xenon/smc.c',
+  'xenon/xgpu.c',
+))
 
 ppc_ss.add(when: 'CONFIG_VOF', if_true: files('vof.c'))
 ppc_ss.add(when: ['CONFIG_VOF', 'CONFIG_PSERIES'], if_true: files('spapr_vof.c'))
