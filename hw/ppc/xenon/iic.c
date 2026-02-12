@@ -207,10 +207,10 @@ uint64_t xenon_iic_read(XenonMachineState *xms, hwaddr off, unsigned size)
 
     if (off == 0x6020 && size <= 8) {
         if (xms->iic_migr2_flip) {
-            v |= 0x200ULL;
+            v |= 0x2000ULL;
             xms->iic_migr2_flip = false;
         } else {
-            v &= ~0x200ULL;
+            v &= ~0x2000ULL;
             xms->iic_migr2_flip = true;
         }
         xenon_iic_write_raw(xms, off, v, size);

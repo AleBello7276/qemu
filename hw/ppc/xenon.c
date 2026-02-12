@@ -237,16 +237,23 @@ static void xenon_init_soc_prv_defaults(XenonMachineState *xms)
 {
     uint64_t por = cpu_to_be64(XENON_PRV_POR_STATUS_INIT);
     uint64_t pmc = cpu_to_be64(XENON_PRV_PMCTRL_INIT);
-    uint8_t verify[8] = { 0 };
     uint64_t por_rb;
+    hwaddr por_off = XENON_PRV_POR_STATUS_ADDR - XENON_PRV_POR_STATUS_ADDR;
+    hwaddr pmc_off = XENON_PRV_PMCTRL_ADDR - XENON_PRV_POR_STATUS_ADDR;
 
+    memset(xms->prv_mmio_data, 0, sizeof(xms->prv_mmio_data));
+    stq_be_p(xms->prv_mmio_data + por_off, XENON_PRV_POR_STATUS_INIT);
+    stq_be_p(xms->prv_mmio_data + pmc_off, XENON_PRV_PMCTRL_INIT);
+
+    /*
+     * Keep a mirror in plain RAM for existing tooling/debug paths that inspect
+     * low physical memory directly.
+     */
     address_space_write(&address_space_memory, XENON_PRV_POR_STATUS_ADDR,
                         MEMTXATTRS_UNSPECIFIED, (const uint8_t *)&por, sizeof(por));
     address_space_write(&address_space_memory, XENON_PRV_PMCTRL_ADDR,
                         MEMTXATTRS_UNSPECIFIED, (const uint8_t *)&pmc, sizeof(pmc));
-    address_space_read(&address_space_memory, XENON_PRV_POR_STATUS_ADDR,
-                       MEMTXATTRS_UNSPECIFIED, verify, sizeof(verify));
-    por_rb = ldq_be_p(verify);
+    por_rb = ldq_be_p(xms->prv_mmio_data + por_off);
 
     if (xms->trace_boot) {
         info_report("xbox360: initialized PRV defaults "
@@ -294,14 +301,70 @@ static void xenon_dbg_invalidate_display(void *opaque)
     }
 }
 
+/*
+ * LibXenon/XeLL console uses the native Xenos 32x32 tiled BGRA surface.
+ * Reuse the same addressing to present guest text output directly.
+ */
+static inline uint32_t xenon_dbg_fb_tiled_index(uint32_t x, uint32_t y,
+                                                uint32_t tiled_width)
+{
+    return (((y >> 5) * 32 * tiled_width + ((x >> 5) << 10) +
+            (x & 3) + ((y & 1) << 2) + (((x & 31) >> 2) << 3) +
+            (((y & 31) >> 1) << 6)) ^ ((y & 8) << 2));
+}
+
+static bool xenon_dbg_fb_prepare(const XenonXgpuFbInfo *fb,
+                                 uint32_t *tiled_width,
+                                 size_t *fb_bytes)
+{
+    uint32_t pitch;
+    uint32_t tw;
+    uint32_t th;
+    size_t bytes;
+
+    if (!fb->enabled || fb->width == 0 || fb->height == 0) {
+        return false;
+    }
+    if (fb->width > 1920U || fb->height > 1200U) {
+        return false;
+    }
+
+    pitch = fb->pitch ? fb->pitch : fb->width;
+    if (pitch < fb->width) {
+        pitch = fb->width;
+    }
+
+    if (fb->tiled) {
+        tw = (pitch + 31U) & ~31U;
+        th = (fb->height + 31U) & ~31U;
+    } else {
+        tw = pitch;
+        th = fb->height;
+    }
+    if (tw == 0 || th == 0) {
+        return false;
+    }
+    bytes = (size_t)tw * (size_t)th * sizeof(uint32_t);
+    if (bytes == 0 || bytes > (size_t)(32 * MiB)) {
+        return false;
+    }
+
+    *tiled_width = tw;
+    *fb_bytes = bytes;
+    return true;
+}
+
 static void xenon_dbg_update_display(void *opaque)
 {
     XenonMachineState *xms = opaque;
+    XenonXgpuFbInfo fb = { 0 };
     DisplaySurface *surface;
+    uint32_t tiled_width;
+    size_t fb_bytes;
     uint8_t *dst;
+    uint32_t bg;
     int bpp;
-    uint32_t c0, c1, c2;
-    uint8_t band;
+    hwaddr fb_pa;
 
     if (!xms->dbg_con) {
         return;
@@ -312,38 +375,79 @@ static void xenon_dbg_update_display(void *opaque)
         return;
     }
 
-    bpp = (surface_bits_per_pixel(surface) + 7) >> 3;
-    c0 = rgb_to_pixel32(0x1d, 0x2d, 0x44);
-    c1 = rgb_to_pixel32(0x2b, 0x90, 0xd9);
-    c2 = rgb_to_pixel32(0x31, 0xc4, 0x8d);
-    band = (uint8_t)((xms->last_post_code >> 56) & 0xff);
-
-    for (int y = 0; y < surface_height(surface); y++) {
-        dst = surface_data(surface) + y * surface_stride(surface);
-        for (int x = 0; x < surface_width(surface); x++) {
-            uint32_t color;
-            uint8_t t = (uint8_t)((x ^ y) + band);
-
-            if (t < 0x55) {
-                color = c0;
-            } else if (t < 0xaa) {
-                color = c1;
-            } else {
-                color = c2;
+    xenon_xgpu_get_fb_info(xms, &fb);
+    if (!xenon_dbg_fb_prepare(&fb, &tiled_width, &fb_bytes)) {
+        bg = rgb_to_pixel32(0x00, 0x00, 0x00);
+        bpp = (surface_bits_per_pixel(surface) + 7) >> 3;
+        for (int y = 0; y < surface_height(surface); y++) {
+            dst = surface_data(surface) + y * surface_stride(surface);
+            for (int x = 0; x < surface_width(surface); x++) {
+                switch (bpp) {
+                case 4:
+                    ((uint32_t *)dst)[x] = bg;
+                    break;
+                case 2:
+                    ((uint16_t *)dst)[x] = rgb_to_pixel16(0, 0, 0);
+                    break;
+                case 1:
+                    dst[x] = rgb_to_pixel8(0, 0, 0);
+                    break;
+                default:
+                    break;
+                }
             }
+        }
+
+        if (xms->trace_boot && xms->dbg_fb_enabled) {
+            info_report("xbox360: xgpu scanout disabled");
+        }
+        xms->dbg_fb_enabled = false;
+        dpy_gfx_update_full(xms->dbg_con);
+        return;
+    }
+
+    if (!xms->dbg_fb_enabled ||
+        xms->dbg_fb_width != fb.width ||
+        xms->dbg_fb_height != fb.height) {
+        qemu_console_resize(xms->dbg_con, fb.width, fb.height);
+        surface = qemu_console_surface(xms->dbg_con);
+        if (!surface || surface_bits_per_pixel(surface) == 0) {
+            return;
+        }
+    }
+
+    if (xms->dbg_fb_shadow_size < fb_bytes) {
+        xms->dbg_fb_shadow = g_realloc(xms->dbg_fb_shadow, fb_bytes);
+        xms->dbg_fb_shadow_size = fb_bytes;
+    }
+
+    fb_pa = fb.base & 0x3FFFFFFFU;
+    address_space_read(&address_space_memory, fb_pa, MEMTXATTRS_UNSPECIFIED,
+                       xms->dbg_fb_shadow, fb_bytes);
+
+    bpp = (surface_bits_per_pixel(surface) + 7) >> 3;
+    for (uint32_t y = 0; y < fb.height; y++) {
+        dst = surface_data(surface) + (int)y * surface_stride(surface);
+        for (uint32_t x = 0; x < fb.width; x++) {
+            uint32_t pixel_index = fb.tiled ?
+                xenon_dbg_fb_tiled_index(x, y, tiled_width) :
+                (y * fb.pitch + x);
+            uint32_t guest_pixel = ldl_be_p(xms->dbg_fb_shadow +
+                                            ((size_t)pixel_index * sizeof(uint32_t)));
+            uint8_t b = (guest_pixel >> 24) & 0xFF;
+            uint8_t g = (guest_pixel >> 16) & 0xFF;
+            uint8_t r = (guest_pixel >> 8) & 0xFF;
+            uint32_t color = rgb_to_pixel32(r, g, b);
+
             switch (bpp) {
             case 4:
                 ((uint32_t *)dst)[x] = color;
                 break;
             case 2:
-                ((uint16_t *)dst)[x] = rgb_to_pixel16((color >> 16) & 0xff,
-                                                      (color >> 8) & 0xff,
-                                                      color & 0xff);
+                ((uint16_t *)dst)[x] = rgb_to_pixel16(r, g, b);
                 break;
             case 1:
-                dst[x] = rgb_to_pixel8((color >> 16) & 0xff,
-                                       (color >> 8) & 0xff,
-                                       color & 0xff);
+                dst[x] = rgb_to_pixel8(r, g, b);
                 break;
             default:
                 break;
@@ -351,6 +455,23 @@ static void xenon_dbg_update_display(void *opaque)
         }
     }
 
+    if (xms->trace_boot &&
+        (!xms->dbg_fb_enabled ||
+         xms->dbg_fb_base != fb.base ||
+         xms->dbg_fb_pitch != fb.pitch ||
+         xms->dbg_fb_width != fb.width ||
+         xms->dbg_fb_height != fb.height)) {
+        info_report("xbox360: xgpu scanout base=0x%08" PRIx32
+                    " pitch=%u size=%ux%u layout=%s",
+                    fb.base, fb.pitch, fb.width, fb.height,
+                    fb.tiled ? "tiled" : "linear");
+    }
+
+    xms->dbg_fb_enabled = true;
+    xms->dbg_fb_base = fb.base;
+    xms->dbg_fb_pitch = fb.pitch;
+    xms->dbg_fb_width = fb.width;
+    xms->dbg_fb_height = fb.height;
     dpy_gfx_update_full(xms->dbg_con);
 }
 
@@ -483,6 +604,16 @@ static uint64_t xenon_seceng_read(void *opaque, hwaddr offset, unsigned size)
             memcpy(buf, xms->pci_cfg_data + off, size);
         } else {
             memset(buf, 0xFF, size);
+        }
+    } else if (pa >= XENON_PRV_POR_STATUS_ADDR &&
+               pa < (XENON_PRV_POR_STATUS_ADDR + XENON_PRV_MMIO_SIZE) &&
+               size >= 1 && size <= 8) {
+        hwaddr off = pa - XENON_PRV_POR_STATUS_ADDR;
+
+        if (off + size <= XENON_PRV_MMIO_SIZE) {
+            memcpy(buf, xms->prv_mmio_data + off, size);
+        } else {
+            memset(buf, 0, size);
         }
     } else if (pa >= XENON_SOC_E1_BASE &&
                pa < (XENON_SOC_E1_BASE + XENON_SOC_E1_SIZE) &&
@@ -650,6 +781,19 @@ static void xenon_seceng_write(void *opaque, hwaddr offset, uint64_t data, unsig
 
         if (off + size <= XENON_PCI_CFG_SIZE) {
             memcpy(xms->pci_cfg_data + off, buf, size);
+            if (off == 0x8000 && size == 4) {
+                /*
+                 * SFCX flash geometry/type fields are strap-derived and
+                 * effectively read-only. Preserve them across guest writes.
+                 */
+                const uint32_t strap_mask =
+                    (0x3U << 4) | (0x3U << 17) | (0x3U << 19) | (0xFU << 21);
+                uint32_t cur = ldl_le_p(xms->pci_cfg_data + 0x8000);
+                uint32_t base = (xms->console_revision == XENON_CONSOLE_XENON) ?
+                                0x01198030U : 0x00043000U;
+                cur = (cur & ~strap_mask) | (base & strap_mask);
+                stl_le_p(xms->pci_cfg_data + 0x8000, cur);
+            }
             if (off == 0x8004 && size == 2) {
                 /*
                  * SFCX status write semantics: write then readback returns
@@ -657,6 +801,16 @@ static void xenon_seceng_write(void *opaque, hwaddr offset, uint64_t data, unsig
                  */
                 stl_le_p(xms->pci_cfg_data + 0x8004, 0x00000600U);
             }
+        }
+    } else if (pa >= XENON_PRV_POR_STATUS_ADDR &&
+               pa < (XENON_PRV_POR_STATUS_ADDR + XENON_PRV_MMIO_SIZE) &&
+               size >= 1 && size <= 8) {
+        hwaddr off = pa - XENON_PRV_POR_STATUS_ADDR;
+
+        if (off + size <= XENON_PRV_MMIO_SIZE) {
+            memcpy(xms->prv_mmio_data + off, buf, size);
+            address_space_write(&address_space_memory, pa, MEMTXATTRS_UNSPECIFIED,
+                                buf, size);
         }
     } else if (pa >= XENON_SOC_E1_BASE &&
                pa < (XENON_SOC_E1_BASE + XENON_SOC_E1_SIZE) &&
@@ -831,9 +985,22 @@ static void xenon_seceng_write(void *opaque, hwaddr offset, uint64_t data, unsig
                 xms->smc_last_uart_status = 0;
                 info_report("xbox360: trace counters reset at HWINIT entry");
             }
+            if (post == 0x40 && !xms->low_mmio_aliases_enabled) {
+                xms->low_mmio_aliases_enabled = true;
+                if (xms->trace_boot) {
+                    uint32_t sfcx_cfg = ldl_le_p(xms->pci_cfg_data + 0x8000);
+                    uint32_t sfcx_sts = ldl_le_p(xms->pci_cfg_data + 0x8004);
+                    info_report("xbox360: enabled low MMIO aliases for CD/XeLL stage");
+                    info_report("xbox360: sfcx-pci seed cfg=0x%08" PRIx32
+                                " sts=0x%08" PRIx32,
+                                sfcx_cfg, sfcx_sts);
+                }
+            }
             if (xms->trace_boot && post == 0x40) {
                 xms->xgpu_trace_reads = 0;
                 xms->xgpu_trace_writes = 0;
+                xms->sfcx_trace_reads = 0;
+                xms->sfcx_trace_writes = 0;
                 xms->smc_trace_reads = 0;
                 xms->smc_trace_writes = 0;
                 info_report("xbox360: trace counters reset at CD entry");
@@ -1253,6 +1420,7 @@ static void xenon_init(MachineState *machine)
 
     xms->srom_data = g_malloc0(XENON_SROM_SIZE);
     xms->nand_raw_data = g_malloc0(nand_size);
+    xms->nand_raw_size = nand_size;
     xms->nand_mmio_data = g_malloc0(XENON_NAND_MMIO_SIZE);
     xms->nb_mmio_data = g_malloc0(XENON_NB_MMIO_SIZE);
     xms->soc_e1_data = g_malloc0(XENON_SOC_E1_SIZE);
@@ -1277,14 +1445,23 @@ static void xenon_init(MachineState *machine)
     memory_region_add_subregion(get_system_memory(), XENON_NAND_BASE, &xms->nand);
     xenon_init_soc_prv_defaults(xms);
     xenon_smc_reset(&xms->smc_state, xms->smc_power_on_reason,
-                    xms->smc_avpack_type,
+                    xms->smc_avpack_type, xms->console_revision,
                     xms->smc_uart, xms->trace_boot);
     memory_region_init_io(&xms->smc, OBJECT(machine), &xenon_smc_ops, xms,
                           "xbox360.smc", XENON_SMC_SIZE);
     memory_region_add_subregion(get_system_memory(), XENON_SMC_BASE, &xms->smc);
+    memory_region_init_io(&xms->sfcx_mmio, OBJECT(machine), &xenon_sfcx_ops, xms,
+                          "xbox360.sfcx", XENON_SFCX_MMIO_SIZE);
+    memory_region_add_subregion(get_system_memory(), XENON_SFCX_MMIO_BASE, &xms->sfcx_mmio);
     memory_region_init_io(&xms->nb_mmio, OBJECT(machine), &xenon_nb_mmio_ops, xms,
                           "xbox360.nb-mmio", XENON_NB_MMIO_SIZE);
     memory_region_add_subregion(get_system_memory(), XENON_NB_MMIO_BASE, &xms->nb_mmio);
+    memory_region_init_io(&xms->pci_cfg_flat, OBJECT(machine), &xenon_pci_cfg_ops, xms,
+                          "xbox360.pci-cfg", XENON_PCI_CFG_SIZE);
+    memory_region_add_subregion(get_system_memory(), XENON_PCI_CFG_BASE, &xms->pci_cfg_flat);
+    memory_region_init_io(&xms->xgpu_bar0, OBJECT(machine), &xenon_xgpu_bar0_ops, xms,
+                          "xbox360.xgpu-bar0", XENON_XGPU_MMIO_SIZE);
+    memory_region_add_subregion(get_system_memory(), XENON_XGPU_BAR0_BASE, &xms->xgpu_bar0);
 
     {
         static const hwaddr bases[] = {
@@ -1432,11 +1609,14 @@ static void xenon_init(MachineState *machine)
     xms->secotp_trace_writes = 0;
     xms->xgpu_trace_reads = 0;
     xms->xgpu_trace_writes = 0;
+    xms->sfcx_trace_reads = 0;
+    xms->sfcx_trace_writes = 0;
     xms->smc_trace_reads = 0;
     xms->smc_trace_writes = 0;
     xms->hwinit_fetch_logs = 0;
     xms->hwinit_bytecode_dumped = false;
     xms->nb_training_done = false;
+    xms->low_mmio_aliases_enabled = false;
     memset(xms->nb_mmio_data, 0, XENON_NB_MMIO_SIZE);
     memset(xms->soc_e1_data, 0, XENON_SOC_E1_SIZE);
     memset(xms->iic_mmio_data, 0, XENON_IIC_MMIO_SIZE);
@@ -1447,7 +1627,9 @@ static void xenon_init(MachineState *machine)
     /*
      * Minimal SFCX-like defaults (matching xenon-emu bring-up values).
      */
-    stl_le_p(xms->pci_cfg_data + 0x8000, 0x01198030U); /* config */
+    stl_le_p(xms->pci_cfg_data + 0x8000,
+             (xms->console_revision == XENON_CONSOLE_XENON) ?
+             0x01198030U : 0x00043000U); /* config */
     stl_le_p(xms->pci_cfg_data + 0x8004, 0x00000600U); /* status */
     stl_le_p(xms->pci_cfg_data + 0x8008, 0x000000FFU); /* command (NO_CMD) */
     stl_le_p(xms->pci_cfg_data + 0x800c, 0x00F70030U); /* address */
@@ -1709,6 +1891,7 @@ static void xenon_machine_finalize(Object *obj)
     g_free(xms->iic_mmio_data);
     g_free(xms->pci_cfg_data);
     g_free(xms->xgpu_mmio_data);
+    g_free(xms->dbg_fb_shadow);
     if (xms->pc_log_timer) {
         timer_free(xms->pc_log_timer);
     }

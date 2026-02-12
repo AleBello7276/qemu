@@ -30,6 +30,8 @@
 #define XENON_NAND_RAW_PAGE         0x210U
 #define XENON_NB_MMIO_BASE          0xE4000000ULL
 #define XENON_NB_MMIO_SIZE          0x00040000ULL
+#define XENON_SFCX_MMIO_BASE        0xEA00C000ULL
+#define XENON_SFCX_MMIO_SIZE        0x00000400ULL
 #define XENON_IIC_MMIO_BASE         0x00050000ULL
 #define XENON_IIC_MMIO_SIZE         0x00008000ULL
 #define XENON_SOC_E1_BASE           0xE1000000ULL
@@ -38,6 +40,7 @@
 #define XENON_PCI_CFG_SIZE          0x01000000ULL
 #define XENON_XGPU_MMIO_BASE        0xE4010000ULL
 #define XENON_XGPU_MMIO_SIZE        0x00020000ULL
+#define XENON_XGPU_BAR0_BASE        0xEC800000ULL
 #define XENON_RAM_BASE              0x00000000ULL
 #define XENON_SECENG_REGION_SIZE    0x0000010000000000ULL /* 1 TiB */
 #define XENON_HASH_BASE_LO          0x0000010000000000ULL
@@ -60,6 +63,7 @@
 #define XENON_SMC_AVPACK_DEFAULT    0x1FU
 #define XENON_PRV_POR_STATUS_ADDR   0x00061000ULL
 #define XENON_PRV_PMCTRL_ADDR       0x00061188ULL
+#define XENON_PRV_MMIO_SIZE         0x00000200ULL
 #define XENON_PRV_POR_STATUS_INIT   0x2000000000000000ULL
 #define XENON_PRV_PMCTRL_INIT       0x382C00000000B001ULL
 #define XENON_SMC_TRACE_LIMIT       64U
@@ -109,17 +113,23 @@ struct XenonMachineState {
     MemoryRegion nand;
     MemoryRegion smc;
     MemoryRegion nb_mmio;
+    MemoryRegion sfcx_mmio;
+    MemoryRegion pci_cfg_flat;
+    MemoryRegion xgpu_bar0;
     XenonSecEngWindow seceng_windows[6];
     XenonSmcState smc_state;
 
     uint8_t *srom_data;
     uint8_t *nand_raw_data;
+    size_t nand_raw_size;
     uint8_t *nand_mmio_data;
     uint8_t *nb_mmio_data;
     uint8_t *soc_e1_data;
+    uint8_t prv_mmio_data[XENON_PRV_MMIO_SIZE];
     uint8_t *iic_mmio_data;
     uint8_t *pci_cfg_data;
     uint8_t *xgpu_mmio_data;
+    uint8_t sfcx_page_buf[0x210];
     uint32_t xgpu_me_ucode[0x900];
     uint32_t xgpu_pfp_ucode[0x120];
     uint32_t xgpu_me_waddr;
@@ -131,6 +141,13 @@ struct XenonMachineState {
     uint8_t cpu_online_mask;
     bool iic_migr2_flip;
     QemuConsole *dbg_con;
+    uint8_t *dbg_fb_shadow;
+    size_t dbg_fb_shadow_size;
+    uint32_t dbg_fb_base;
+    uint32_t dbg_fb_pitch;
+    uint32_t dbg_fb_width;
+    uint32_t dbg_fb_height;
+    bool dbg_fb_enabled;
     QEMUTimer *pc_log_timer;
     uint64_t last_logged_pc;
     uint64_t pc_log_count;
@@ -148,6 +165,8 @@ struct XenonMachineState {
     uint32_t secotp_trace_writes;
     uint32_t xgpu_trace_reads;
     uint32_t xgpu_trace_writes;
+    uint32_t sfcx_trace_reads;
+    uint32_t sfcx_trace_writes;
     uint32_t smc_trace_reads;
     uint32_t smc_trace_writes;
     uint32_t smc_last_in_status;
@@ -157,6 +176,7 @@ struct XenonMachineState {
     bool hwinit_bytecode_dumped;
     bool smc_last_status_valid;
     bool nb_training_done;
+    bool low_mmio_aliases_enabled;
     bool trace_boot;
     bool pretty_post;
     bool rgh2_patches;
@@ -166,6 +186,9 @@ struct XenonMachineState {
 extern const MemoryRegionOps xenon_nand_ops;
 extern const MemoryRegionOps xenon_nb_mmio_ops;
 extern const MemoryRegionOps xenon_smc_ops;
+extern const MemoryRegionOps xenon_sfcx_ops;
+extern const MemoryRegionOps xenon_pci_cfg_ops;
+extern const MemoryRegionOps xenon_xgpu_bar0_ops;
 const char *xenon_console_revision_name(XenonConsoleRevision rev);
 
 #endif /* HW_PPC_XENON_INTERNAL_H */

@@ -8,11 +8,13 @@
 #define HW_PPC_XENON_SMC_H
 
 #include "qemu/osdep.h"
+#include "hw/ppc/xenon/hana.h"
 
 #define XENON_SMC_BASE 0xEA001000ULL
 #define XENON_SMC_SIZE 0x100ULL
 
 typedef struct XenonSmcState {
+    uint32_t gpio_regs[9];
     uint8_t fifo[16];
     uint8_t fifo_pos;
     uint8_t fifo_read_pos;
@@ -26,15 +28,20 @@ typedef struct XenonSmcState {
     uint32_t smi_int_enabled;
     uint32_t clock_int_enabled;
     uint32_t clock_int_status;
+    uint32_t hana_regs[XENON_HANA_REG_COUNT];
+    uint8_t ddc_regs[256];
+    uint8_t ddc_edid[128];
     uint8_t power_on_reason;
     uint8_t avpack_type;
+    uint8_t console_revision;
     bool trace_boot;
     bool uart_stdio;
     bool uart_status_flip;
 } XenonSmcState;
 
 void xenon_smc_reset(XenonSmcState *smc, uint8_t power_on_reason, uint8_t avpack_type,
-                     const char *uart_backend, bool trace_boot);
+                     uint8_t console_revision, const char *uart_backend,
+                     bool trace_boot);
 uint64_t xenon_smc_read(XenonSmcState *smc, uint64_t offset, unsigned size);
 void xenon_smc_write(XenonSmcState *smc, uint64_t offset, uint64_t data, unsigned size);
 

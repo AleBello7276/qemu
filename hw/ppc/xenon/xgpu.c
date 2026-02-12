@@ -25,6 +25,9 @@
 #define XGPU_REG_CP_PFP_UCODE_ADDR      0x045F
 #define XGPU_REG_CP_PFP_UCODE_DATA      0x0460
 #define XGPU_REG_RBBM_STATUS            0x05D0
+#define XGPU_REG_D1GRPH_ALT_SURFACE_ADDRESS 0x0A10
+#define XGPU_REG_D1GRPH_ALT_PITCH       0x0A11
+#define XGPU_REG_D1GRPH_ALT_MODE        0x0A12
 #define XGPU_REG_MH_STATUS              0x0A07
 #define XGPU_REG_COHER_SIZE_HOST        0x0A2F
 #define XGPU_REG_COHER_BASE_HOST        0x0A30
@@ -32,12 +35,19 @@
 #define XGPU_REG_RB_EDRAM_TIMING        0x0F00
 #define XGPU_REG_RB_EDRAM_INFO          0x0F02
 #define XGPU_REG_D1CRTC_CONTROL         0x180A
+#define XGPU_REG_D1GRPH_ENABLE          0x1840
+#define XGPU_REG_D1GRPH_PRIMARY_SURFACE_ADDRESS 0x1844
+#define XGPU_REG_D1GRPH_PITCH           0x1848
+#define XGPU_REG_D1GRPH_X_END           0x184D
+#define XGPU_REG_D1GRPH_Y_END           0x184E
 #define XGPU_REG_DC_LUT_AUTOFILL        0x1928
 #define XGPU_REG_D1MODE_V_COUNTER       0x194C
 #define XGPU_REG_D1MODE_VBLANK_STATUS   0x194D
 #define XGPU_REG_D1MODE_INT_MASK        0x1950
 #define XGPU_REG_D1MODE_VBLANK_VLINE_STATUS 0x1951
 #define XGPU_REG_D1MODE_VIEWPORT_SIZE   0x1961
+#define XGPU_REG_ANA_ADDR               0x1E54
+#define XGPU_REG_ANA_DATA               0x1E55
 
 #define XGPU_REG_SPLL_CNTL              0x0084
 #define XGPU_REG_RPLL_CNTL              0x0091
@@ -122,7 +132,11 @@ void xenon_xgpu_reset(XenonMachineState *xms)
     xenon_xgpu_store32(xms, XGPU_REG_CONFIG_CNTL, 0x10000000U);
     xenon_xgpu_store32(xms, XGPU_REG_RBBM_DEBUG, 0x000F0000U);
     xenon_xgpu_store32(xms, XGPU_REG_RBBM_STATUS, 0x00000600U);
-    xenon_xgpu_store32(xms, XGPU_REG_MH_STATUS, 0x02000000U);
+    /*
+     * libxenon video init polls MH_STATUS bit1 at BAR0+0x281c, while
+     * existing warm-boot paths also observe the high ready bit.
+     */
+    xenon_xgpu_store32(xms, XGPU_REG_MH_STATUS, 0x02000002U);
     xenon_xgpu_store32(xms, XGPU_REG_CP_ME_STATUS, 0x00000000U);
     xenon_xgpu_store32(xms, XGPU_REG_COHER_STATUS_HOST, 0x80000000U);
     xenon_xgpu_store32(xms, XGPU_REG_D1MODE_VBLANK_VLINE_STATUS, 0x00000001U);
@@ -184,7 +198,7 @@ uint32_t xenon_xgpu_mmio_read32(XenonMachineState *xms, hwaddr off)
         xenon_xgpu_store32(xms, reg, v);
         break;
     case XGPU_REG_MH_STATUS:
-        v |= 0x02000000U;
+        v |= 0x02000002U;
         xenon_xgpu_store32(xms, reg, v);
         break;
     case XGPU_REG_CP_ME_STATUS:
@@ -205,8 +219,11 @@ uint32_t xenon_xgpu_mmio_read32(XenonMachineState *xms, hwaddr off)
         }
         break;
     case XGPU_REG_DC_LUT_AUTOFILL:
-        if (v == 0x00000001U) {
-            v = 0x02000000U;
+        if (v == 0x00000001U || v == 0x01000000U) {
+            /*
+             * libxenon waits for bit1 to signal LUT autofill completion.
+             */
+            v = 0x00000002U;
             xenon_xgpu_store32(xms, reg, v);
         }
         break;
@@ -245,7 +262,7 @@ void xenon_xgpu_mmio_write32(XenonMachineState *xms, hwaddr off, uint32_t v)
         }
         break;
     case XGPU_REG_MH_STATUS:
-        v |= 0x02000000U;
+        v |= 0x02000002U;
         xenon_xgpu_store32(xms, reg, v);
         break;
     case XGPU_REG_RB_EDRAM_TIMING:
@@ -288,6 +305,10 @@ void xenon_xgpu_mmio_write32(XenonMachineState *xms, hwaddr off, uint32_t v)
     case XGPU_REG_RBBM_CNTL:
     case XGPU_REG_D1CRTC_CONTROL:
     case XGPU_REG_DC_LUT_AUTOFILL:
+        if (v == 0x00000001U || v == 0x01000000U) {
+            xenon_xgpu_store32(xms, reg, 0x00000002U);
+        }
+        break;
     case XGPU_REG_D1MODE_V_COUNTER:
     case XGPU_REG_D1MODE_VBLANK_STATUS:
     case XGPU_REG_D1MODE_INT_MASK:
@@ -297,8 +318,74 @@ void xenon_xgpu_mmio_write32(XenonMachineState *xms, hwaddr off, uint32_t v)
     case XGPU_REG_COHER_SIZE_HOST:
     case XGPU_REG_COHER_BASE_HOST:
     case XGPU_REG_RBBM_DEBUG:
+    case XGPU_REG_ANA_ADDR:
         break;
+    case XGPU_REG_ANA_DATA: {
+        /*
+         * ANA writes are posted through this pair (0x7950/0x7954). Once
+         * data is written, hardware advances the address latch so polling
+         * code observes completion.
+         */
+        uint32_t addr = xenon_xgpu_load32(xms, XGPU_REG_ANA_ADDR);
+        xenon_xgpu_store32(xms, XGPU_REG_ANA_ADDR, addr ^ 1U);
+        break;
+    }
     default:
         break;
     }
+}
+
+bool xenon_xgpu_get_fb_info(XenonMachineState *xms, XenonXgpuFbInfo *info)
+{
+    uint32_t viewport;
+    uint32_t width;
+    uint32_t height;
+    uint32_t pitch;
+    uint32_t base;
+    uint32_t alt_base;
+    uint32_t alt_pitch;
+    uint32_t alt_mode;
+    bool enabled;
+
+    if (!info) {
+        return false;
+    }
+
+    base = xenon_xgpu_load32(xms, XGPU_REG_D1GRPH_PRIMARY_SURFACE_ADDRESS);
+    pitch = xenon_xgpu_load32(xms, XGPU_REG_D1GRPH_PITCH);
+    alt_base = xenon_xgpu_load32(xms, XGPU_REG_D1GRPH_ALT_SURFACE_ADDRESS);
+    alt_pitch = xenon_xgpu_load32(xms, XGPU_REG_D1GRPH_ALT_PITCH);
+    alt_mode = xenon_xgpu_load32(xms, XGPU_REG_D1GRPH_ALT_MODE);
+    width = xenon_xgpu_load32(xms, XGPU_REG_D1GRPH_X_END);
+    height = xenon_xgpu_load32(xms, XGPU_REG_D1GRPH_Y_END);
+    viewport = xenon_xgpu_load32(xms, XGPU_REG_D1MODE_VIEWPORT_SIZE);
+    enabled = (xenon_xgpu_load32(xms, XGPU_REG_D1GRPH_ENABLE) & 1U) != 0;
+
+    if (!base) {
+        base = alt_base;
+    }
+    if (!pitch) {
+        pitch = alt_pitch;
+    }
+
+    if (!width) {
+        width = viewport >> 16;
+    }
+    if (!height) {
+        height = viewport & 0xFFFFU;
+    }
+    if (!pitch) {
+        pitch = width;
+    }
+    if (pitch < width) {
+        pitch = width;
+    }
+
+    info->base = base & 0x3FFFFFFFU;
+    info->pitch = pitch;
+    info->width = width;
+    info->height = height;
+    info->enabled = enabled && base != 0 && width != 0 && height != 0;
+    info->tiled = (alt_mode & 0x00080000U) != 0;
+    return true;
 }
