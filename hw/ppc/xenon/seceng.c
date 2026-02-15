@@ -8,12 +8,18 @@
 #include "qemu/error-report.h"
 #include "exec/cpu-common.h"
 #include "system/address-spaces.h"
+#include "hw/ppc/xenon/debug.h"
 #include "hw/ppc/xenon/machine-priv.h"
 #include "hw/ppc/xenon/postcodes.h"
 #include "hw/ppc/xenon/iic.h"
 #include "hw/ppc/xenon/xgpu.h"
 #include "target/ppc/spr_common.h"
 #include "target/ppc/mmu-hash64.h"
+
+#define SECENG_INFO(...) XENON_LOG_INFO(xms, XENON_LOG_MODULE_SECENG, __VA_ARGS__)
+#define NAND_INFO(...)  XENON_LOG_INFO(xms, XENON_LOG_MODULE_NAND, __VA_ARGS__)
+#define SOC_INFO(...)   XENON_LOG_INFO(xms, XENON_LOG_MODULE_SOC, __VA_ARGS__)
+#define XGPU_INFO(...)  XENON_LOG_INFO(xms, XENON_LOG_MODULE_XGPU, __VA_ARGS__)
 
 /*
  * Translate a Xenon "SecEng region" effective address to the underlying
@@ -230,9 +236,9 @@ static uint64_t xenon_seceng_read(void *opaque, hwaddr offset, unsigned size)
         case 8: v = ldq_be_p(buf); break;
         default: break;
         }
-        info_report("xbox360: nand-read EA=0x%016" PRIx64 " PA=0x%08" PRIx64
-                    " size=%u val=0x%016" PRIx64,
-                    ea, (uint64_t)pa, size, v);
+        NAND_INFO("nand-read EA=0x%016" PRIx64 " PA=0x%08" PRIx64
+                  " size=%u val=0x%016" PRIx64,
+                  ea, (uint64_t)pa, size, v);
         xms->nand_trace_reads++;
     }
     if (xms && xms->trace_boot &&
@@ -248,9 +254,9 @@ static uint64_t xenon_seceng_read(void *opaque, hwaddr offset, unsigned size)
         case 8: v = ldq_be_p(buf); break;
         default: break;
         }
-        info_report("xbox360: soc-read  EA=0x%016" PRIx64 " PA=0x%08" PRIx64
-                    " size=%u val=0x%016" PRIx64,
-                    ea, (uint64_t)pa, size, v);
+        SOC_INFO("soc-read  EA=0x%016" PRIx64 " PA=0x%08" PRIx64
+                 " size=%u val=0x%016" PRIx64,
+                 ea, (uint64_t)pa, size, v);
         xms->soc_trace_reads++;
     }
     if (xms && xms->trace_boot &&

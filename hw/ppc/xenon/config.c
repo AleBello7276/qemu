@@ -9,6 +9,16 @@
 #include "qemu/error-report.h"
 #include "hw/ppc/xenon/config.h"
 
+static void xenon_log_watch_entry_free(gpointer data)
+{
+    XenonLogWatchEntry *entry = data;
+    if (!entry) {
+        return;
+    }
+    g_free(entry->label);
+    g_free(entry);
+}
+
 /*
  * Trim leading and trailing ASCII whitespace in-place.
  *
@@ -168,6 +178,12 @@ void xenon_toml_config_clear(XenonTomlConfig *cfg)
     g_free(cfg->odd_image);
     g_free(cfg->hdd_image);
     g_free(cfg->smc_uart);
+    g_free(cfg->log_level);
+    g_free(cfg->log_modules);
+    if (cfg->watch_points) {
+        g_ptr_array_free(cfg->watch_points, TRUE);
+        cfg->watch_points = NULL;
+    }
     memset(cfg, 0, sizeof(*cfg));
 }
 
@@ -338,6 +354,64 @@ bool xenon_toml_config_load(const char *path, XenonTomlConfig *cfg, Error **errp
             }
             cfg->console_revision = v;
             cfg->have_console_revision = true;
+        } else if ((sec == SEC_BOOT || sec == SEC_NONE) &&
+                   !g_ascii_strcasecmp(key, "LogLevel")) {
+            xenon_set_str(&cfg->log_level, val);
+        } else if ((sec == SEC_BOOT || sec == SEC_NONE) &&
+                   !g_ascii_strcasecmp(key, "LogModules")) {
+            xenon_set_str(&cfg->log_modules, val);
+        } else if ((sec == SEC_BOOT || sec == SEC_NONE) &&
+                   !g_ascii_strcasecmp(key, "StallThreshold")) {
+            uint64_t v;
+            if (qemu_strtou64(val, NULL, 0, &v) != 0) {
+                error_setg(errp, "invalid StallThreshold at line %d", i + 1);
+                return false;
+            }
+            cfg->stall_threshold = (int64_t)v;
+            cfg->have_stall_threshold = true;
+        } else if ((sec == SEC_BOOT || sec == SEC_NONE) &&
+                   !g_ascii_strcasecmp(key, "DisasmLength")) {
+            uint64_t v;
+            if (qemu_strtou64(val, NULL, 0, &v) != 0) {
+                error_setg(errp, "invalid DisasmLength at line %d", i + 1);
+                return false;
+            }
+            cfg->disasm_length = (int64_t)v;
+            cfg->have_disasm_length = true;
+        } else if ((sec == SEC_BOOT || sec == SEC_NONE) &&
+                   !g_ascii_strcasecmp(key, "WatchPC")) {
+            if (!cfg->watch_points) {
+                cfg->watch_points = g_ptr_array_new_with_free_func(
+                    (GDestroyNotify)xenon_log_watch_entry_free);
+            }
+            char *watch = g_strdup(val);
+            char *label = NULL;
+            char *colon = strchr(watch, ':');
+            if (colon) {
+                *colon = '\\0';
+                char *trimmed = xenon_trim(colon + 1);
+                if (*trimmed) {
+                    label = g_strdup(trimmed);
+                }
+            }
+            char *addr_str = xenon_trim(watch);
+            if (!*addr_str) {
+                g_free(watch);
+                g_free(label);
+                continue;
+            }
+            uint64_t ea;
+            if (qemu_strtou64(addr_str, NULL, 0, &ea) != 0) {
+                g_free(watch);
+                g_free(label);
+                error_setg(errp, "invalid WatchPC at line %d", i + 1);
+                return false;
+            }
+            XenonLogWatchEntry *entry = g_new0(XenonLogWatchEntry, 1);
+            entry->ea = ea;
+            entry->label = label;
+            g_ptr_array_add(cfg->watch_points, entry);
+            g_free(watch);
         }
     }
 

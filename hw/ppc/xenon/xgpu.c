@@ -6,7 +6,10 @@
 
 #include "qemu/osdep.h"
 #include "qemu/error-report.h"
+#include "hw/ppc/xenon/debug.h"
 #include "hw/ppc/xenon/xgpu.h"
+
+#define XGPU_INFO(...) XENON_LOG_INFO(xms, XENON_LOG_MODULE_XGPU, __VA_ARGS__)
 
 #define XGPU_REG(off) ((uint32_t)((off) >> 2))
 #define XGPU_REG_CONFIG_CNTL            0x0038
@@ -179,9 +182,9 @@ void xenon_xgpu_reset(XenonMachineState *xms)
     }
 
     if (xms->trace_boot) {
-        info_report("xbox360: xgpu profile revision=%s devid=0x%04x revid=0x%02x",
-                    xenon_console_revision_name(xms->console_revision),
-                    device_id, rev_id);
+        XGPU_INFO("xgpu profile revision=%s devid=0x%04x revid=0x%02x",
+                  xenon_console_revision_name(xms->console_revision),
+                  device_id, rev_id);
     }
 }
 

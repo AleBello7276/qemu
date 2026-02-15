@@ -10,9 +10,17 @@
 #include "system/address-spaces.h"
 #include "system/system.h"
 #include "hw/core/cpu.h"
+#include "hw/ppc/xenon/debug.h"
 #include "hw/ppc/xenon/machine-priv.h"
 #include "hw/ppc/xenon/exceptions.h"
 #include "hw/ppc/xenon/postcodes.h"
+
+#define POST_INFO(...) XENON_LOG_INFO(xms, XENON_LOG_MODULE_POST, __VA_ARGS__)
+#define POST_DEBUG(...) XENON_LOG_DEBUG(xms, XENON_LOG_MODULE_POST, __VA_ARGS__)
+#define TRACE_INFO(...) XENON_LOG_INFO(xms, XENON_LOG_MODULE_TRACE, __VA_ARGS__)
+#define TRACE_DEBUG(...) XENON_LOG_DEBUG(xms, XENON_LOG_MODULE_TRACE, __VA_ARGS__)
+#define PC_INFO(...) XENON_LOG_INFO(xms, XENON_LOG_MODULE_PC, __VA_ARGS__)
+#define PC_DEBUG(...) XENON_LOG_DEBUG(xms, XENON_LOG_MODULE_PC, __VA_ARGS__)
 
 /*
  * Emit a single normalized POST log entry.
@@ -53,15 +61,15 @@ static void xenon_post_log(XenonMachineState *xms, uint64_t post_raw,
     }
 
     if (desc) {
-        info_report("xbox360: POST write code=0x%016" PRIx64
-                    " (%s) @EA=0x%016" PRIx64
-                    " host_us=%" PRIu64 " dpost_us=%" PRIu64,
-                    post_raw, desc, ea, host_us, dpost_us);
+        POST_INFO("POST write code=0x%016" PRIx64
+                  " (%s) @EA=0x%016" PRIx64
+                  " host_us=%" PRIu64 " dpost_us=%" PRIu64,
+                  post_raw, desc, ea, host_us, dpost_us);
     } else {
-        info_report("xbox360: POST write code=0x%016" PRIx64
-                    " @EA=0x%016" PRIx64
-                    " host_us=%" PRIu64 " dpost_us=%" PRIu64,
-                    post_raw, ea, host_us, dpost_us);
+        POST_INFO("POST write code=0x%016" PRIx64
+                  " @EA=0x%016" PRIx64
+                  " host_us=%" PRIu64 " dpost_us=%" PRIu64,
+                  post_raw, ea, host_us, dpost_us);
     }
 }
 
@@ -131,9 +139,9 @@ static void xenon_dump_hwinit_bytecode(XenonMachineState *xms, CPUPPCState *env)
                            size >= 4 ? ldl_be_p(buf) : 0);
     g_file_set_contents(meta_path, meta->str, -1, NULL);
 
-    info_report("xbox360: dumped HWINIT bytecode r3=0x%016" PRIx64 " r4=0x%016" PRIx64
-                " -> %s (size=0x%" PRIx64 ")",
-                start_ea, end_ea, bin_path, size);
+    TRACE_INFO("dumped HWINIT bytecode r3=0x%016" PRIx64 " r4=0x%016" PRIx64
+               " -> %s (size=0x%" PRIx64 ")",
+               start_ea, end_ea, bin_path, size);
 }
 
 /*
@@ -148,11 +156,11 @@ void xenon_trace_on_post_observed(XenonMachineState *xms, uint64_t post_raw,
                                   CPUPPCState *env)
 {
     if (xms->trace_boot && post == 0xF2 && env) {
-        info_report("xbox360: F2 context NIP=0x%016" PRIx64
-                    " SRR0=0x%016" PRIx64 " LR=0x%016" PRIx64
-                    " CTR=0x%016" PRIx64,
-                    env->nip, env->spr[SPR_SRR0],
-                    env->lr, env->ctr);
+        POST_INFO("F2 context NIP=0x%016" PRIx64
+                  " SRR0=0x%016" PRIx64 " LR=0x%016" PRIx64
+                  " CTR=0x%016" PRIx64,
+                  env->nip, env->spr[SPR_SRR0],
+                  env->lr, env->ctr);
     }
     if (!xms->rgh2_patches && post == 0xF2) {
         warn_report("xbox360: CB_A SHA verify failed (POST=0xF2). "
@@ -171,59 +179,59 @@ void xenon_trace_on_post_observed(XenonMachineState *xms, uint64_t post_raw,
         uint32_t e15e8 = ldl_be_p(xms->nb_mmio_data + 0x000015E8);
         uint32_t e15ec = ldl_be_p(xms->nb_mmio_data + 0x000015EC);
 
-        info_report("xbox360: AF context NIP=0x%016" PRIx64
-                    " LR=0x%016" PRIx64 " CTR=0x%016" PRIx64
-                    " r0=0x%016" PRIx64 " r1=0x%016" PRIx64
-                    " r2=0x%016" PRIx64 " r3=0x%016" PRIx64
-                    " r4=0x%016" PRIx64 " r5=0x%016" PRIx64,
-                    env->nip, env->lr, env->ctr,
-                    env->gpr[0], env->gpr[1], env->gpr[2],
-                    env->gpr[3], env->gpr[4], env->gpr[5]);
-        info_report("xbox360: AF regs e1040000(be)=0x%08" PRIx32
-                    " e1040000(le)=0x%08" PRIx32
-                    " d0008000(be)=0x%08" PRIx32 " d0008000(le)=0x%08" PRIx32
-                    " d0008004(be)=0x%08" PRIx32 " d0008004(le)=0x%08" PRIx32
-                    " d0008008(be)=0x%08" PRIx32 " d0008008(le)=0x%08" PRIx32
-                    " e40015e0=0x%08" PRIx32
-                    " e40015e8=0x%08" PRIx32 " e40015ec=0x%08" PRIx32,
-                    e104_be, e104_le,
-                    d8000_be, d8000_le,
-                    d8004_be, d8004_le,
-                    d8008_be, d8008_le,
-                    e15e0, e15e8, e15ec);
+        POST_INFO("AF context NIP=0x%016" PRIx64
+                  " LR=0x%016" PRIx64 " CTR=0x%016" PRIx64
+                  " r0=0x%016" PRIx64 " r1=0x%016" PRIx64
+                  " r2=0x%016" PRIx64 " r3=0x%016" PRIx64
+                  " r4=0x%016" PRIx64 " r5=0x%016" PRIx64,
+                  env->nip, env->lr, env->ctr,
+                  env->gpr[0], env->gpr[1], env->gpr[2],
+                  env->gpr[3], env->gpr[4], env->gpr[5]);
+        POST_INFO("AF regs e1040000(be)=0x%08" PRIx32
+                  " e1040000(le)=0x%08" PRIx32
+                  " d0008000(be)=0x%08" PRIx32 " d0008000(le)=0x%08" PRIx32
+                  " d0008004(be)=0x%08" PRIx32 " d0008004(le)=0x%08" PRIx32
+                  " d0008008(be)=0x%08" PRIx32 " d0008008(le)=0x%08" PRIx32
+                  " e40015e0=0x%08" PRIx32
+                  " e40015e8=0x%08" PRIx32 " e40015ec=0x%08" PRIx32,
+                  e104_be, e104_le,
+                  d8000_be, d8000_le,
+                  d8004_be, d8004_le,
+                  d8008_be, d8008_le,
+                  e15e0, e15e8, e15ec);
     }
     if (xms->trace_boot && post == 0xAE && env) {
-        info_report("xbox360: AE context NIP=0x%016" PRIx64
-                    " SRR0=0x%016" PRIx64 " SRR1=0x%016" PRIx64
-                    " DAR=0x%016" PRIx64 " DSISR=0x%016" PRIx64
-                    " HSRR0=0x%016" PRIx64 " HSRR1=0x%016" PRIx64,
-                    env->nip, env->spr[SPR_SRR0], env->spr[SPR_SRR1],
-                    env->spr[SPR_DAR], env->spr[SPR_DSISR],
-                    env->spr[SPR_HSRR0], env->spr[SPR_HSRR1]);
+        POST_INFO("AE context NIP=0x%016" PRIx64
+                  " SRR0=0x%016" PRIx64 " SRR1=0x%016" PRIx64
+                  " DAR=0x%016" PRIx64 " DSISR=0x%016" PRIx64
+                  " HSRR0=0x%016" PRIx64 " HSRR1=0x%016" PRIx64,
+                  env->nip, env->spr[SPR_SRR0], env->spr[SPR_SRR1],
+                  env->spr[SPR_DAR], env->spr[SPR_DSISR],
+                  env->spr[SPR_HSRR0], env->spr[SPR_HSRR1]);
     }
     if (xms->trace_boot && post == 0x84 && env) {
-        info_report("xbox360: 84 context NIP=0x%016" PRIx64
-                    " SRR0=0x%016" PRIx64 " SRR1=0x%016" PRIx64
-                    " LPCR=0x%016" PRIx64
-                    " PPE_TLB_INDEX=0x%016" PRIx64
-                    " PPE_TLB_VPN=0x%016" PRIx64
-                    " PPE_TLB_RPN=0x%016" PRIx64,
-                    env->nip, env->spr[SPR_SRR0], env->spr[SPR_SRR1],
-                    env->spr[SPR_LPCR],
-                    env->spr[SPR_XENON_PPE_TLB_INDEX],
-                    env->spr[SPR_XENON_PPE_TLB_VPN],
-                    env->spr[SPR_XENON_PPE_TLB_RPN]);
+        POST_INFO("84 context NIP=0x%016" PRIx64
+                  " SRR0=0x%016" PRIx64 " SRR1=0x%016" PRIx64
+                  " LPCR=0x%016" PRIx64
+                  " PPE_TLB_INDEX=0x%016" PRIx64
+                  " PPE_TLB_VPN=0x%016" PRIx64
+                  " PPE_TLB_RPN=0x%016" PRIx64,
+                  env->nip, env->spr[SPR_SRR0], env->spr[SPR_SRR1],
+                  env->spr[SPR_LPCR],
+                  env->spr[SPR_XENON_PPE_TLB_INDEX],
+                  env->spr[SPR_XENON_PPE_TLB_VPN],
+                  env->spr[SPR_XENON_PPE_TLB_RPN]);
     }
     if (xms->trace_boot && post == 0x4B && env) {
-        info_report("xbox360: 4B context NIP=0x%016" PRIx64
-                    " LR=0x%016" PRIx64 " CTR=0x%016" PRIx64
-                    " r1=0x%016" PRIx64 " r2=0x%016" PRIx64
-                    " r3=0x%016" PRIx64 " r4=0x%016" PRIx64
-                    " r5=0x%016" PRIx64 " r6=0x%016" PRIx64
-                    " r7=0x%016" PRIx64 " r8=0x%016" PRIx64,
-                    env->nip, env->lr, env->ctr,
-                    env->gpr[1], env->gpr[2], env->gpr[3], env->gpr[4],
-                    env->gpr[5], env->gpr[6], env->gpr[7], env->gpr[8]);
+        POST_INFO("4B context NIP=0x%016" PRIx64
+                  " LR=0x%016" PRIx64 " CTR=0x%016" PRIx64
+                  " r1=0x%016" PRIx64 " r2=0x%016" PRIx64
+                  " r3=0x%016" PRIx64 " r4=0x%016" PRIx64
+                  " r5=0x%016" PRIx64 " r6=0x%016" PRIx64
+                  " r7=0x%016" PRIx64 " r8=0x%016" PRIx64,
+                  env->nip, env->lr, env->ctr,
+                  env->gpr[1], env->gpr[2], env->gpr[3], env->gpr[4],
+                  env->gpr[5], env->gpr[6], env->gpr[7], env->gpr[8]);
     }
     if (xms->trace_boot && post == 0x83 && env) {
         uint8_t dar_bytes[16] = { 0 };
@@ -234,34 +242,34 @@ void xenon_trace_on_post_observed(XenonMachineState *xms, uint64_t post_raw,
             dar_rc = cpu_memory_rw_debug(cs, (vaddr)env->spr[SPR_DAR],
                                          dar_bytes, sizeof(dar_bytes), 0);
         }
-        info_report("xbox360: 83 context NIP=0x%016" PRIx64
-                    " LR=0x%016" PRIx64 " CTR=0x%016" PRIx64
-                    " r1=0x%016" PRIx64 " r2=0x%016" PRIx64
-                    " r3=0x%016" PRIx64 " r4=0x%016" PRIx64
-                    " r5=0x%016" PRIx64 " r6=0x%016" PRIx64
-                    " r7=0x%016" PRIx64 " r8=0x%016" PRIx64
-                    " r9=0x%016" PRIx64 " r10=0x%016" PRIx64
-                    " DAR=0x%016" PRIx64 " DSISR=0x%016" PRIx64
-                    " LPCR=0x%016" PRIx64
-                    " PPE_TLB_INDEX=0x%016" PRIx64
-                    " PPE_TLB_VPN=0x%016" PRIx64
-                    " PPE_TLB_RPN=0x%016" PRIx64,
-                    env->nip, env->lr, env->ctr,
-                    env->gpr[1], env->gpr[2], env->gpr[3], env->gpr[4],
-                    env->gpr[5], env->gpr[6], env->gpr[7], env->gpr[8],
-                    env->gpr[9], env->gpr[10],
-                    env->spr[SPR_DAR], env->spr[SPR_DSISR],
-                    env->spr[SPR_LPCR],
-                    env->spr[SPR_XENON_PPE_TLB_INDEX],
-                    env->spr[SPR_XENON_PPE_TLB_VPN],
-                    env->spr[SPR_XENON_PPE_TLB_RPN]);
-        info_report("xbox360: 83 DAR bytes rc=%d [%02x %02x %02x %02x %02x %02x %02x %02x"
-                    " %02x %02x %02x %02x %02x %02x %02x %02x]",
-                    dar_rc,
-                    dar_bytes[0], dar_bytes[1], dar_bytes[2], dar_bytes[3],
-                    dar_bytes[4], dar_bytes[5], dar_bytes[6], dar_bytes[7],
-                    dar_bytes[8], dar_bytes[9], dar_bytes[10], dar_bytes[11],
-                    dar_bytes[12], dar_bytes[13], dar_bytes[14], dar_bytes[15]);
+        POST_INFO("83 context NIP=0x%016" PRIx64
+                  " LR=0x%016" PRIx64 " CTR=0x%016" PRIx64
+                  " r1=0x%016" PRIx64 " r2=0x%016" PRIx64
+                  " r3=0x%016" PRIx64 " r4=0x%016" PRIx64
+                  " r5=0x%016" PRIx64 " r6=0x%016" PRIx64
+                  " r7=0x%016" PRIx64 " r8=0x%016" PRIx64
+                  " r9=0x%016" PRIx64 " r10=0x%016" PRIx64
+                  " DAR=0x%016" PRIx64 " DSISR=0x%016" PRIx64
+                  " LPCR=0x%016" PRIx64
+                  " PPE_TLB_INDEX=0x%016" PRIx64
+                  " PPE_TLB_VPN=0x%016" PRIx64
+                  " PPE_TLB_RPN=0x%016" PRIx64,
+                  env->nip, env->lr, env->ctr,
+                  env->gpr[1], env->gpr[2], env->gpr[3], env->gpr[4],
+                  env->gpr[5], env->gpr[6], env->gpr[7], env->gpr[8],
+                  env->gpr[9], env->gpr[10],
+                  env->spr[SPR_DAR], env->spr[SPR_DSISR],
+                  env->spr[SPR_LPCR],
+                  env->spr[SPR_XENON_PPE_TLB_INDEX],
+                  env->spr[SPR_XENON_PPE_TLB_VPN],
+                  env->spr[SPR_XENON_PPE_TLB_RPN]);
+        POST_INFO("83 DAR bytes rc=%d [%02x %02x %02x %02x %02x %02x %02x %02x"
+                  " %02x %02x %02x %02x %02x %02x %02x %02x]",
+                  dar_rc,
+                  dar_bytes[0], dar_bytes[1], dar_bytes[2], dar_bytes[3],
+                  dar_bytes[4], dar_bytes[5], dar_bytes[6], dar_bytes[7],
+                  dar_bytes[8], dar_bytes[9], dar_bytes[10], dar_bytes[11],
+                  dar_bytes[12], dar_bytes[13], dar_bytes[14], dar_bytes[15]);
     }
 
     if (!xms->have_last_post_code || xms->last_post_code != post_raw) {
@@ -278,17 +286,17 @@ void xenon_trace_on_post_observed(XenonMachineState *xms, uint64_t post_raw,
             xms->hwinit_fetch_logs = 0;
             xms->smc_last_status_valid = false;
             xms->smc_last_uart_status = 0;
-            info_report("xbox360: trace counters reset at HWINIT entry");
+            TRACE_INFO("trace counters reset at HWINIT entry");
         }
         if (post == 0x40 && !xms->low_mmio_aliases_enabled) {
             xms->low_mmio_aliases_enabled = true;
             if (xms->trace_boot) {
                 uint32_t sfcx_cfg = ldl_le_p(xms->pci_cfg_data + 0x8000);
                 uint32_t sfcx_sts = ldl_le_p(xms->pci_cfg_data + 0x8004);
-                info_report("xbox360: enabled low MMIO aliases for CD/XeLL stage");
-                info_report("xbox360: sfcx-pci seed cfg=0x%08" PRIx32
-                            " sts=0x%08" PRIx32,
-                            sfcx_cfg, sfcx_sts);
+                TRACE_INFO("enabled low MMIO aliases for CD/XeLL stage");
+                TRACE_INFO("sfcx-pci seed cfg=0x%08" PRIx32
+                           " sts=0x%08" PRIx32,
+                           sfcx_cfg, sfcx_sts);
             }
         }
         if (xms->trace_boot && post == 0x40) {
@@ -317,28 +325,28 @@ void xenon_trace_on_post_observed(XenonMachineState *xms, uint64_t post_raw,
                 }
             }
             if (cd_bootblk_empty) {
-                info_report("xbox360: CD bootblk remains empty at CD entry "
-                            "(EA=0x%016" PRIx64 " -> PA=0x%016" HWADDR_PRIx ")",
-                            (uint64_t)cd_ea, cd_pa);
+                POST_INFO("CD bootblk remains empty at CD entry "
+                          "(EA=0x%016" PRIx64 " -> PA=0x%016" HWADDR_PRIx ")",
+                          (uint64_t)cd_ea, cd_pa);
             }
-            info_report("xbox360: CD bootblk EA=0x%016" PRIx64
-                        " PA=0x%016" HWADDR_PRIx " src=%s "
-                        "%08" PRIx32 " %08" PRIx32 " %08" PRIx32 " %08" PRIx32
-                        " %08" PRIx32 " %08" PRIx32 " %08" PRIx32 " %08" PRIx32,
-                        (uint64_t)cd_ea, cd_pa,
-                        cd_pa_from_soft_tlb ? "soft-tlb" :
-                        (cd_pa_page != (hwaddr)-1 ? "debug-page" : "fallback"),
-                        ldl_be_p(cd_bootblk + 0x00), ldl_be_p(cd_bootblk + 0x04),
-                        ldl_be_p(cd_bootblk + 0x08), ldl_be_p(cd_bootblk + 0x0C),
-                        ldl_be_p(cd_bootblk + 0x10), ldl_be_p(cd_bootblk + 0x14),
-                        ldl_be_p(cd_bootblk + 0x18), ldl_be_p(cd_bootblk + 0x1C));
+            POST_INFO("CD bootblk EA=0x%016" PRIx64
+                      " PA=0x%016" HWADDR_PRIx " src=%s "
+                      "%08" PRIx32 " %08" PRIx32 " %08" PRIx32 " %08" PRIx32
+                      " %08" PRIx32 " %08" PRIx32 " %08" PRIx32 " %08" PRIx32,
+                      (uint64_t)cd_ea, cd_pa,
+                      cd_pa_from_soft_tlb ? "soft-tlb" :
+                      (cd_pa_page != (hwaddr)-1 ? "debug-page" : "fallback"),
+                      ldl_be_p(cd_bootblk + 0x00), ldl_be_p(cd_bootblk + 0x04),
+                      ldl_be_p(cd_bootblk + 0x08), ldl_be_p(cd_bootblk + 0x0C),
+                      ldl_be_p(cd_bootblk + 0x10), ldl_be_p(cd_bootblk + 0x14),
+                      ldl_be_p(cd_bootblk + 0x18), ldl_be_p(cd_bootblk + 0x1C));
             xms->xgpu_trace_reads = 0;
             xms->xgpu_trace_writes = 0;
             xms->sfcx_trace_reads = 0;
             xms->sfcx_trace_writes = 0;
             xms->smc_trace_reads = 0;
             xms->smc_trace_writes = 0;
-            info_report("xbox360: trace counters reset at CD entry");
+            TRACE_INFO("trace counters reset at CD entry");
         }
         if (post == 0x2E && env) {
             xenon_dump_hwinit_bytecode(xms, env);
@@ -352,28 +360,28 @@ void xenon_trace_on_post_observed(XenonMachineState *xms, uint64_t post_raw,
                 ((srr0 & 0x3FFFFF00000ULL) | (hrmor & 0x3FFFFF00000ULL)) |
                 (srr0 & 0xFFFFFULL);
 
-            info_report("xbox360: context SRR0=0x%016" PRIx64 " SRR1=0x%016" PRIx64
-                        " DAR=0x%016" PRIx64 " DSISR=0x%016" PRIx64,
-                        env->spr[SPR_SRR0], env->spr[SPR_SRR1],
-                        env->spr[SPR_DAR], env->spr[SPR_DSISR]);
+            TRACE_INFO("context SRR0=0x%016" PRIx64 " SRR1=0x%016" PRIx64
+                       " DAR=0x%016" PRIx64 " DSISR=0x%016" PRIx64,
+                       env->spr[SPR_SRR0], env->spr[SPR_SRR1],
+                       env->spr[SPR_DAR], env->spr[SPR_DSISR]);
             address_space_read(&address_space_memory, srr0, MEMTXATTRS_UNSPECIFIED,
                                srr0_bytes, sizeof(srr0_bytes));
-            info_report("xbox360: bytes@SRR0[0x%016" PRIx64 "]=%02x %02x %02x %02x "
-                        "%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
-                        srr0,
-                        srr0_bytes[0], srr0_bytes[1], srr0_bytes[2], srr0_bytes[3],
-                        srr0_bytes[4], srr0_bytes[5], srr0_bytes[6], srr0_bytes[7],
-                        srr0_bytes[8], srr0_bytes[9], srr0_bytes[10], srr0_bytes[11],
-                        srr0_bytes[12], srr0_bytes[13], srr0_bytes[14], srr0_bytes[15]);
+            TRACE_INFO("bytes@SRR0[0x%016" PRIx64 "]=%02x %02x %02x %02x "
+                       "%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+                       srr0,
+                       srr0_bytes[0], srr0_bytes[1], srr0_bytes[2], srr0_bytes[3],
+                       srr0_bytes[4], srr0_bytes[5], srr0_bytes[6], srr0_bytes[7],
+                       srr0_bytes[8], srr0_bytes[9], srr0_bytes[10], srr0_bytes[11],
+                       srr0_bytes[12], srr0_bytes[13], srr0_bytes[14], srr0_bytes[15]);
             address_space_read(&address_space_memory, real_ra, MEMTXATTRS_UNSPECIFIED,
                                real_bytes, sizeof(real_bytes));
-            info_report("xbox360: bytes@RealRA[0x%016" PRIx64 "]=%02x %02x %02x %02x "
-                        "%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
-                        real_ra,
-                        real_bytes[0], real_bytes[1], real_bytes[2], real_bytes[3],
-                        real_bytes[4], real_bytes[5], real_bytes[6], real_bytes[7],
-                        real_bytes[8], real_bytes[9], real_bytes[10], real_bytes[11],
-                        real_bytes[12], real_bytes[13], real_bytes[14], real_bytes[15]);
+            TRACE_INFO("bytes@RealRA[0x%016" PRIx64 "]=%02x %02x %02x %02x "
+                       "%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+                       real_ra,
+                       real_bytes[0], real_bytes[1], real_bytes[2], real_bytes[3],
+                       real_bytes[4], real_bytes[5], real_bytes[6], real_bytes[7],
+                       real_bytes[8], real_bytes[9], real_bytes[10], real_bytes[11],
+                       real_bytes[12], real_bytes[13], real_bytes[14], real_bytes[15]);
         }
         xms->last_post_code = post_raw;
         xms->have_last_post_code = true;
@@ -402,12 +410,20 @@ void xenon_pc_log_tick(void *opaque)
         return;
     }
 
-    if (!xms->trace_boot) {
-        return;
-    }
-
     env = &xms->boot_cpu->env;
     pc = env->nip;
+    for (unsigned i = 0; i < xms->pc_watchpoint_count; i++) {
+        XenonPcWatchpoint *watch = &xms->pc_watchpoints[i];
+        if (watch->triggered) {
+            continue;
+        }
+        if (watch->ea == pc) {
+            watch->triggered = true;
+            xenon_log_dump_disasm(xms, env, pc, xms->disasm_count,
+                                  watch->label ? watch->label : "watchpoint",
+                                  XENON_LOG_LEVEL_DEBUG, XENON_LOG_MODULE_PC);
+        }
+    }
     rc4_hot_loop = (pc >= 0x0000000004001e5cULL &&
                     pc <= 0x0000000004001e9cULL);
     sha_hot_loop = (pc >= 0x0000000004001270ULL &&
@@ -427,23 +443,23 @@ void xenon_pc_log_tick(void *opaque)
             (pc >> 16) != (xms->last_logged_pc >> 16) ||
             (now_ms - xms->last_pc_log_ms) >= 1000) {
             if (rc4_hot_loop || sha_hot_loop) {
-                info_report("xbox360: pc=0x%016" PRIx64
-                            " host_us=%" PRIu64
-                            " dhost_us=%" PRIu64
-                            " vms=%" PRIi64
-                            " CTR=0x%016" PRIx64
-                            " r3=0x%016" PRIx64
-                            " r4=0x%016" PRIx64
-                            " r10=0x%016" PRIx64,
-                            pc, host_us, dhost_us, now_ms,
-                            env->ctr, env->gpr[3],
-                            env->gpr[4], env->gpr[10]);
+                PC_INFO("pc=0x%016" PRIx64
+                        " host_us=%" PRIu64
+                        " dhost_us=%" PRIu64
+                        " vms=%" PRIi64
+                        " CTR=0x%016" PRIx64
+                        " r3=0x%016" PRIx64
+                        " r4=0x%016" PRIx64
+                        " r10=0x%016" PRIx64,
+                        pc, host_us, dhost_us, now_ms,
+                        env->ctr, env->gpr[3],
+                        env->gpr[4], env->gpr[10]);
             } else {
-                info_report("xbox360: pc=0x%016" PRIx64
-                            " host_us=%" PRIu64
-                            " dhost_us=%" PRIu64
-                            " vms=%" PRIi64,
-                            pc, host_us, dhost_us, now_ms);
+                PC_INFO("pc=0x%016" PRIx64
+                        " host_us=%" PRIu64
+                        " dhost_us=%" PRIu64
+                        " vms=%" PRIi64,
+                        pc, host_us, dhost_us, now_ms);
             }
             xms->last_pc_log_ms = now_ms;
             xms->trace_last_pc_host_us = now_host_us;
@@ -452,7 +468,8 @@ void xenon_pc_log_tick(void *opaque)
         xms->pc_log_count++;
     } else {
         xms->same_pc_log_count++;
-        if ((xms->same_pc_log_count % 16384) == 0) {
+        if ((xms->pc_repeat_threshold && xms->same_pc_log_count >= xms->pc_repeat_threshold) ||
+            (!xms->pc_repeat_threshold && (xms->same_pc_log_count % 16384) == 0)) {
             uint8_t r8_byte = 0;
             int r8_dbg_rc = -1;
             CPUState *cs = env_cpu(env);
@@ -460,34 +477,38 @@ void xenon_pc_log_tick(void *opaque)
             if (cs) {
                 r8_dbg_rc = cpu_memory_rw_debug(cs, env->gpr[8], &r8_byte, 1, 0);
             }
-            info_report("xbox360: pc repeat pc=0x%016" PRIx64
-                        " host_us=%" PRIu64
-                        " dhost_us=%" PRIu64
-                        " vms=%" PRIi64
-                        " count=%u LR=0x%016" PRIx64
-                        " CTR=0x%016" PRIx64
-                        " CR=0x%08" PRIx32
-                        " SRR0=0x%016" PRIx64
-                        " SRR1=0x%016" PRIx64
-                        " DAR=0x%016" PRIx64
-                        " DSISR=0x%016" PRIx64
-                        " r3=0x%016" PRIx64
-                        " r4=0x%016" PRIx64
-                        " r5=0x%016" PRIx64
-                        " r8=0x%016" PRIx64
-                        " [r8]=0x%02x rc=%d"
-                        " r10=0x%016" PRIx64
-                        " r29=0x%016" PRIx64
-                        " r30=0x%016" PRIx64,
-                        pc, host_us, dhost_us, now_ms, xms->same_pc_log_count,
-                        env->lr, env->ctr,
-                        env->crf[0],
-                        env->spr[SPR_SRR0], env->spr[SPR_SRR1],
-                        env->spr[SPR_DAR], env->spr[SPR_DSISR],
-                        env->gpr[3], env->gpr[4], env->gpr[5],
-                        env->gpr[8], r8_byte, r8_dbg_rc,
-                        env->gpr[10], env->gpr[29], env->gpr[30]);
+            PC_DEBUG("pc repeat pc=0x%016" PRIx64
+                     " host_us=%" PRIu64
+                     " dhost_us=%" PRIu64
+                     " vms=%" PRIi64
+                     " count=%u LR=0x%016" PRIx64
+                     " CTR=0x%016" PRIx64
+                     " CR=0x%08" PRIx32
+                     " SRR0=0x%016" PRIx64
+                     " SRR1=0x%016" PRIx64
+                     " DAR=0x%016" PRIx64
+                     " DSISR=0x%016" PRIx64
+                     " r3=0x%016" PRIx64
+                     " r4=0x%016" PRIx64
+                     " r5=0x%016" PRIx64
+                     " r8=0x%016" PRIx64
+                     " [r8]=0x%02x rc=%d"
+                     " r10=0x%016" PRIx64
+                     " r29=0x%016" PRIx64
+                     " r30=0x%016" PRIx64,
+                     pc, host_us, dhost_us, now_ms, xms->same_pc_log_count,
+                     env->lr, env->ctr,
+                     env->crf[0],
+                     env->spr[SPR_SRR0], env->spr[SPR_SRR1],
+                     env->spr[SPR_DAR], env->spr[SPR_DSISR],
+                     env->gpr[3], env->gpr[4], env->gpr[5],
+                     env->gpr[8], r8_byte, r8_dbg_rc,
+                     env->gpr[10], env->gpr[29], env->gpr[30]);
+            xenon_log_dump_disasm(xms, env, pc, xms->disasm_count,
+                                  "stall", XENON_LOG_LEVEL_DEBUG,
+                                  XENON_LOG_MODULE_PC);
             xms->trace_last_pc_host_us = now_host_us;
+            xms->same_pc_log_count = 0;
         }
     }
 
@@ -497,32 +518,32 @@ void xenon_pc_log_tick(void *opaque)
 
         if (xenon_decode_exception_vector_pc(pc, &vector, &is_alias) &&
             pc != xms->last_exception_pc) {
-            info_report("xbox360: exception vector 0x%04" PRIx64
-                        " (%s) pc=0x%016" PRIx64 "%s"
-                        " SRR0=0x%016" PRIx64 " SRR1=0x%016" PRIx64
-                        " DAR=0x%016" PRIx64 " DSISR=0x%016" PRIx64
-                        " HSRR0=0x%016" PRIx64 " HSRR1=0x%016" PRIx64
-                        " LR=0x%016" PRIx64 " CTR=0x%016" PRIx64
-                        " MSR=0x%016" PRIx64
-                        " LPCR=0x%016" PRIx64
-                        " RMOR=0x%016" PRIx64
-                        " HRMOR=0x%016" PRIx64
-                        " XTLBI=0x%016" PRIx64
-                        " XTLBV=0x%016" PRIx64
-                        " XTLBR=0x%016" PRIx64
-                        " pending=0x%08x",
-                        vector, xenon_exception_vector_name(vector),
-                        pc, is_alias ? " (hrmor-alias)" : "",
-                        env->spr[SPR_SRR0], env->spr[SPR_SRR1],
-                        env->spr[SPR_DAR], env->spr[SPR_DSISR],
-                        env->spr[SPR_HSRR0], env->spr[SPR_HSRR1],
-                        env->lr, env->ctr,
-                        env->msr, env->spr[SPR_LPCR],
-                        env->spr[SPR_RMOR], env->spr[SPR_HRMOR],
-                        env->spr[SPR_XENON_PPE_TLB_INDEX],
-                        env->spr[SPR_XENON_PPE_TLB_VPN],
-                        env->spr[SPR_XENON_PPE_TLB_RPN],
-                        env->pending_interrupts);
+            PC_INFO("exception vector 0x%04" PRIx64
+                    " (%s) pc=0x%016" PRIx64 "%s"
+                    " SRR0=0x%016" PRIx64 " SRR1=0x%016" PRIx64
+                    " DAR=0x%016" PRIx64 " DSISR=0x%016" PRIx64
+                    " HSRR0=0x%016" PRIx64 " HSRR1=0x%016" PRIx64
+                    " LR=0x%016" PRIx64 " CTR=0x%016" PRIx64
+                    " MSR=0x%016" PRIx64
+                    " LPCR=0x%016" PRIx64
+                    " RMOR=0x%016" PRIx64
+                    " HRMOR=0x%016" PRIx64
+                    " XTLBI=0x%016" PRIx64
+                    " XTLBV=0x%016" PRIx64
+                    " XTLBR=0x%016" PRIx64
+                    " pending=0x%08x",
+                    vector, xenon_exception_vector_name(vector),
+                    pc, is_alias ? " (hrmor-alias)" : "",
+                    env->spr[SPR_SRR0], env->spr[SPR_SRR1],
+                    env->spr[SPR_DAR], env->spr[SPR_DSISR],
+                    env->spr[SPR_HSRR0], env->spr[SPR_HSRR1],
+                    env->lr, env->ctr,
+                    env->msr, env->spr[SPR_LPCR],
+                    env->spr[SPR_RMOR], env->spr[SPR_HRMOR],
+                    env->spr[SPR_XENON_PPE_TLB_INDEX],
+                    env->spr[SPR_XENON_PPE_TLB_VPN],
+                    env->spr[SPR_XENON_PPE_TLB_RPN],
+                    env->pending_interrupts);
             xms->last_exception_pc = pc;
         }
     }
@@ -544,42 +565,42 @@ void xenon_pc_log_tick(void *opaque)
                                pbuf, sizeof(pbuf));
         }
 
-        info_report("xbox360: CD offset probe EA=0x%016" PRIx64
-                    " dbg_rc=%d vread_be=0x%08" PRIx32
-                    " pa_page=0x%016" HWADDR_PRIx
-                    " pa=0x%016" HWADDR_PRIx
-                    " pread_be=0x%08" PRIx32,
-                    ea, dbg_rc, ldl_be_p(vbuf),
-                    pa_page, pa, ldl_be_p(pbuf));
+        POST_INFO("CD offset probe EA=0x%016" PRIx64
+                  " dbg_rc=%d vread_be=0x%08" PRIx32
+                  " pa_page=0x%016" HWADDR_PRIx
+                  " pa=0x%016" HWADDR_PRIx
+                  " pread_be=0x%08" PRIx32,
+                  ea, dbg_rc, ldl_be_p(vbuf),
+                  pa_page, pa, ldl_be_p(pbuf));
         xms->cd_offset_probe_logged = true;
     }
 
     if (pc >= XENON_EXC_ALIAS_BASE &&
         pc < (XENON_EXC_ALIAS_BASE + XENON_EXC_ALIAS_SIZE)) {
         if (pc != xms->last_exc_handler_pc) {
-            info_report("xbox360: exc-handler pc=0x%016" PRIx64
-                        " off=0x%04" PRIx64
-                        " LR=0x%016" PRIx64 " CTR=0x%016" PRIx64
-                        " SRR0=0x%016" PRIx64 " SRR1=0x%016" PRIx64
-                        " DAR=0x%016" PRIx64 " DSISR=0x%016" PRIx64
-                        " XTLBV=0x%016" PRIx64 " XTLBR=0x%016" PRIx64
-                        " pending=0x%08x",
-                        pc, (uint64_t)(pc - XENON_EXC_ALIAS_BASE),
-                        env->lr, env->ctr,
-                        env->spr[SPR_SRR0], env->spr[SPR_SRR1],
-                        env->spr[SPR_DAR], env->spr[SPR_DSISR],
-                        env->spr[SPR_XENON_PPE_TLB_VPN],
-                        env->spr[SPR_XENON_PPE_TLB_RPN],
-                        env->pending_interrupts);
+            PC_INFO("exc-handler pc=0x%016" PRIx64
+                    " off=0x%04" PRIx64
+                    " LR=0x%016" PRIx64 " CTR=0x%016" PRIx64
+                    " SRR0=0x%016" PRIx64 " SRR1=0x%016" PRIx64
+                    " DAR=0x%016" PRIx64 " DSISR=0x%016" PRIx64
+                    " XTLBV=0x%016" PRIx64 " XTLBR=0x%016" PRIx64
+                    " pending=0x%08x",
+                    pc, (uint64_t)(pc - XENON_EXC_ALIAS_BASE),
+                    env->lr, env->ctr,
+                    env->spr[SPR_SRR0], env->spr[SPR_SRR1],
+                    env->spr[SPR_DAR], env->spr[SPR_DSISR],
+                    env->spr[SPR_XENON_PPE_TLB_VPN],
+                    env->spr[SPR_XENON_PPE_TLB_RPN],
+                    env->pending_interrupts);
             xms->last_exc_handler_pc = pc;
             xms->exc_handler_same_pc_count = 0;
         } else if (pc == (XENON_EXC_ALIAS_BASE + 0x0e80)) {
             xms->exc_handler_same_pc_count++;
             if ((xms->exc_handler_same_pc_count % 1024) == 0) {
-                info_report("xbox360: exc-handler repeat pc=0x%016" PRIx64
-                            " count=%u LR=0x%016" PRIx64 " CTR=0x%016" PRIx64,
-                            pc, xms->exc_handler_same_pc_count,
-                            env->lr, env->ctr);
+                PC_INFO("exc-handler repeat pc=0x%016" PRIx64
+                        " count=%u LR=0x%016" PRIx64 " CTR=0x%016" PRIx64,
+                        pc, xms->exc_handler_same_pc_count,
+                        env->lr, env->ctr);
             }
         }
         if (pc == (XENON_EXC_ALIAS_BASE + 0x0478) && xms->trace_boot) {
@@ -596,11 +617,11 @@ void xenon_pc_log_tick(void *opaque)
                     mask |= (1u << i);
                 }
             }
-            info_report("xbox360: cd-poll @0x478 r10(EA)=0x%016" PRIx64
-                        " r3=0x%016" PRIx64 " r9=0x%016" PRIx64
-                        " r2=0x%016" PRIx64 " mask=0x%02" PRIx32,
-                        env->gpr[10], env->gpr[3], env->gpr[9],
-                        env->gpr[2], mask);
+        POST_INFO("cd-poll @0x478 r10(EA)=0x%016" PRIx64
+                  " r3=0x%016" PRIx64 " r9=0x%016" PRIx64
+                  " r2=0x%016" PRIx64 " mask=0x%02" PRIx32,
+                  env->gpr[10], env->gpr[3], env->gpr[9],
+                  env->gpr[2], mask);
         }
     }
 
@@ -618,9 +639,9 @@ void xenon_pc_log_tick(void *opaque)
         address_space_read(&address_space_memory, ip_pa, MEMTXATTRS_UNSPECIFIED,
                            buf, sizeof(buf));
         word = ldl_be_p(buf);
-        info_report("xbox360: hwinit-fetch[%u] ip_ea=0x%016" PRIx64
-                    " ip_pa=0x%08" PRIx64 " word=0x%08" PRIx32,
-                    xms->hwinit_fetch_logs, ip_ea, (uint64_t)ip_pa, word);
+        TRACE_INFO("hwinit-fetch[%u] ip_ea=0x%016" PRIx64
+                   " ip_pa=0x%08" PRIx64 " word=0x%08" PRIx32,
+                   xms->hwinit_fetch_logs, ip_ea, (uint64_t)ip_pa, word);
         xms->hwinit_fetch_logs++;
     }
     if ((pc == 0x30039bc || pc == 0x3003a78 || pc == 0x3003ad8) &&
@@ -630,19 +651,19 @@ void xenon_pc_log_tick(void *opaque)
         uint32_t o1 = (insn >> 21) & 0x1f;
         uint32_t o2 = (insn >> 16) & 0x1f;
 
-        info_report("xbox360: hwinit-decode[%u] insn=0x%08" PRIx32
-                    " op=0x%02" PRIx32 " o1=0x%02" PRIx32 " o2=0x%02" PRIx32
-                    " ip_ea=0x%016" PRIx64,
-                    xms->hwinit_fetch_logs, insn, op, o1, o2, env->gpr[16]);
+        TRACE_INFO("hwinit-decode[%u] insn=0x%08" PRIx32
+                   " op=0x%02" PRIx32 " o1=0x%02" PRIx32 " o2=0x%02" PRIx32
+                   " ip_ea=0x%016" PRIx64,
+                   xms->hwinit_fetch_logs, insn, op, o1, o2, env->gpr[16]);
         xms->hwinit_fetch_logs++;
     }
     if (pc == 0x30036e0 && xms->trace_boot) {
-        info_report("xbox360: hwinit-outfailure ip_ea=0x%016" PRIx64
-                    " end_ea=0x%016" PRIx64 " insn=0x%08" PRIx64
-                    " r5=0x%016" PRIx64 " r6=0x%016" PRIx64
-                    " r7=0x%016" PRIx64,
-                    env->gpr[16], env->gpr[4], env->gpr[17],
-                    env->gpr[5], env->gpr[6], env->gpr[7]);
+        TRACE_INFO("hwinit-outfailure ip_ea=0x%016" PRIx64
+                   " end_ea=0x%016" PRIx64 " insn=0x%08" PRIx64
+                   " r5=0x%016" PRIx64 " r6=0x%016" PRIx64
+                   " r7=0x%016" PRIx64,
+                   env->gpr[16], env->gpr[4], env->gpr[17],
+                   env->gpr[5], env->gpr[6], env->gpr[7]);
     }
     if (pc == 0x800000001c000c70 && xms->trace_boot) {
         uint64_t base = env->gpr[2] - 0x7fc0ULL;
@@ -654,14 +675,14 @@ void xenon_pc_log_tick(void *opaque)
         for (int i = 0; i < 6; i++) {
             slot[i] = ldl_be_p(raw + (i * 4));
         }
-        info_report("xbox360: cd-thread-check r2=0x%016" PRIx64
-                    " base=0x%016" PRIx64
-                    " slots=%08" PRIx32 " %08" PRIx32 " %08" PRIx32
-                    " %08" PRIx32 " %08" PRIx32 " %08" PRIx32
-                    " tb=%" PRIu64 " r3=0x%016" PRIx64,
-                    env->gpr[2], base,
-                    slot[0], slot[1], slot[2], slot[3], slot[4], slot[5],
-                    cpu_ppc_load_tbl(env), env->gpr[3]);
+        POST_INFO("cd-thread-check r2=0x%016" PRIx64
+                  " base=0x%016" PRIx64
+                  " slots=%08" PRIx32 " %08" PRIx32 " %08" PRIx32
+                  " %08" PRIx32 " %08" PRIx32 " %08" PRIx32
+                  " tb=%" PRIu64 " r3=0x%016" PRIx64,
+                  env->gpr[2], base,
+                  slot[0], slot[1], slot[2], slot[3], slot[4], slot[5],
+                  cpu_ppc_load_tbl(env), env->gpr[3]);
     }
 
     timer_mod(xms->pc_log_timer, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + 50);

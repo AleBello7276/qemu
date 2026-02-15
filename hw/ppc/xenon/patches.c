@@ -8,8 +8,11 @@
 #include "qemu/error-report.h"
 #include "hw/core/cpu.h"
 #include "system/address-spaces.h"
+#include "hw/ppc/xenon/debug.h"
 #include "hw/ppc/xenon/machine-priv.h"
 #include "target/ppc/spr_common.h"
+
+#define PATCH_INFO(...) XENON_LOG_INFO(xms, XENON_LOG_MODULE_PATCH, __VA_ARGS__)
 
 /*
  * Convert a firmware code address (CIA/EA-style) to a best-effort physical
@@ -82,14 +85,14 @@ static void xenon_apply_rgh2_patches(XenonMachineState *xms)
         hwaddr pa = xenon_bootstrap_cia_to_pa(patches[i].cia);
 
         if (xms->trace_boot) {
-            info_report("xbox360: rgh2 patch %s at CIA=0x%08" PRIx64
-                        " PA=0x%08" PRIx64 " via=%s",
-                        patches[i].name, patches[i].cia, (uint64_t)pa,
-                        wrote_via_ea ? "ea" : "pa");
+            PATCH_INFO("rgh2 patch %s at CIA=0x%08" PRIx64
+                       " PA=0x%08" PRIx64 " via=%s",
+                       patches[i].name, patches[i].cia, (uint64_t)pa,
+                       wrote_via_ea ? "ea" : "pa");
         }
     }
     xms->rgh2_patches_applied = true;
-    info_report("xbox360: applied CB_A RGH2 compatibility patches");
+    PATCH_INFO("applied CB_A RGH2 compatibility patches");
 }
 
 /*
@@ -121,14 +124,14 @@ static void xenon_apply_cd_rgh1_patches(XenonMachineState *xms)
         hwaddr pa = xenon_bootstrap_cia_to_pa(patches[i].cia);
 
         if (xms->trace_boot) {
-            info_report("xbox360: cd-rgh1 patch %s at CIA=0x%08" PRIx64
-                        " PA=0x%08" PRIx64 " via=%s",
-                        patches[i].name, patches[i].cia, (uint64_t)pa,
-                        wrote_via_ea ? "ea" : "pa");
+            PATCH_INFO("cd-rgh1 patch %s at CIA=0x%08" PRIx64
+                       " PA=0x%08" PRIx64 " via=%s",
+                       patches[i].name, patches[i].cia, (uint64_t)pa,
+                       wrote_via_ea ? "ea" : "pa");
         }
     }
     xms->cd_rgh1_patches_applied = true;
-    info_report("xbox360: applied CD RGH1 compatibility patches");
+    PATCH_INFO("applied CD RGH1 compatibility patches");
 }
 
 /*
@@ -165,11 +168,11 @@ void xenon_patches_on_post_write(XenonMachineState *xms, uint8_t post,
         env->gpr[3] = 1;
         env->gpr[5] = 0;
         if (xms->trace_boot) {
-            info_report("xbox360: cd-sha-bypass post=0x49 force r3=1 r5=0"
-                        " got_ea=0x%016" PRIx64 " exp_ea=0x%016" PRIx64
-                        " rc(got)=%d rc(exp)=%d nip=0x%016" PRIx64
-                        " lr=0x%016" PRIx64,
-                        got_ea, exp_ea, got_rc, exp_rc, env->nip, env->lr);
+            PATCH_INFO("cd-sha-bypass post=0x49 force r3=1 r5=0"
+                       " got_ea=0x%016" PRIx64 " exp_ea=0x%016" PRIx64
+                       " rc(got)=%d rc(exp)=%d nip=0x%016" PRIx64
+                       " lr=0x%016" PRIx64,
+                       got_ea, exp_ea, got_rc, exp_rc, env->nip, env->lr);
         }
     }
 

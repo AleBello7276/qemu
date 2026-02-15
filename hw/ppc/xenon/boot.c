@@ -8,8 +8,11 @@
 #include "qemu/cutils.h"
 #include "qemu/error-report.h"
 #include "system/address-spaces.h"
+#include "hw/ppc/xenon/debug.h"
 #include "hw/ppc/xenon/machine-priv.h"
 #include "target/ppc/mmu-hash32.h"
+
+#define BOOT_INFO(...) XENON_LOG_INFO(xms, XENON_LOG_MODULE_BOOT, __VA_ARGS__)
 
 /*
  * Validate the NAND "magic" / identification bytes from a raw NAND dump.
@@ -167,12 +170,12 @@ void xenon_init_soc_prv_defaults(XenonMachineState *xms)
     por_rb = ldq_be_p(xms->prv_mmio_data + por_off);
 
     if (xms->trace_boot) {
-        info_report("xbox360: initialized PRV defaults "
-                    "POR=0x%016" PRIx64 " PMCTRL=0x%016" PRIx64
-                    " readback.POR=0x%016" PRIx64,
-                    (uint64_t)XENON_PRV_POR_STATUS_INIT,
-                    (uint64_t)XENON_PRV_PMCTRL_INIT,
-                    por_rb);
+        BOOT_INFO("initialized PRV defaults "
+                  "POR=0x%016" PRIx64 " PMCTRL=0x%016" PRIx64
+                  " readback.POR=0x%016" PRIx64,
+                  (uint64_t)XENON_PRV_POR_STATUS_INIT,
+                  (uint64_t)XENON_PRV_PMCTRL_INIT,
+                  por_rb);
     }
 }
 

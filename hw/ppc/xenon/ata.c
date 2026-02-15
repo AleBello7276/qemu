@@ -9,6 +9,9 @@
 #include "exec/cpu-common.h"
 #include "hw/ppc/xenon/ata.h"
 #include "hw/ppc/xenon/xenon-internal.h"
+#include "hw/ppc/xenon/debug.h"
+
+#define ATA_INFO(...) XENON_LOG_INFO(xms, XENON_LOG_MODULE_SATA, __VA_ARGS__)
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -1059,9 +1062,9 @@ static uint64_t xenon_sata_read(void *opaque, hwaddr offset, unsigned size)
     }
 
     if (xms->trace_boot && ata->trace_reads < XENON_ATA_TRACE_LIMIT) {
-        info_report("xbox360: sata-read off=0x%03" PRIx64
-                    " size=%u val=0x%016" PRIx64,
-                    (uint64_t)offset, size, xenon_ata_pack_be(tmp, size));
+        ATA_INFO("sata-read off=0x%03" PRIx64
+                 " size=%u val=0x%016" PRIx64,
+                 (uint64_t)offset, size, xenon_ata_pack_be(tmp, size));
         ata->trace_reads++;
     }
 
@@ -1090,9 +1093,9 @@ static void xenon_sata_write(void *opaque, hwaddr offset, uint64_t data, unsigne
     xenon_ata_unpack_be(tmp, size, data);
 
     if (xms->trace_boot && ata->trace_writes < XENON_ATA_TRACE_LIMIT) {
-        info_report("xbox360: sata-write off=0x%03" PRIx64
-                    " size=%u val=0x%016" PRIx64,
-                    (uint64_t)offset, size, data);
+        ATA_INFO("sata-write off=0x%03" PRIx64
+                 " size=%u val=0x%016" PRIx64,
+                 (uint64_t)offset, size, data);
         ata->trace_writes++;
     }
 

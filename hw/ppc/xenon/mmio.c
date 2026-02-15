@@ -7,8 +7,15 @@
 #include "qemu/osdep.h"
 #include "qemu/error-report.h"
 #include "exec/cpu-common.h"
+#include "hw/ppc/xenon/debug.h"
 #include "hw/ppc/xenon/xenon-internal.h"
 #include "hw/ppc/xenon/xgpu.h"
+
+#define NAND_INFO(...) XENON_LOG_INFO(xms, XENON_LOG_MODULE_NAND, __VA_ARGS__)
+#define SOC_INFO(...)  XENON_LOG_INFO(xms, XENON_LOG_MODULE_SOC, __VA_ARGS__)
+#define SMC_INFO(...)  XENON_LOG_INFO(xms, XENON_LOG_MODULE_SMC, __VA_ARGS__)
+#define SATA_INFO(...) XENON_LOG_INFO(xms, XENON_LOG_MODULE_SATA, __VA_ARGS__)
+#define XGPU_INFO(...) XENON_LOG_INFO(xms, XENON_LOG_MODULE_XGPU, __VA_ARGS__)
 
 /*
  * NAND MMIO read handler.
@@ -43,9 +50,9 @@ static uint64_t xenon_nand_read(void *opaque, hwaddr offset, unsigned size)
     }
 
     if (xms->trace_boot && xms->nand_trace_reads < 32) {
-        info_report("xbox360: nand-mmio-read off=0x%08" PRIx64
-                    " size=%u val=0x%016" PRIx64,
-                    (uint64_t)offset, size, v);
+        NAND_INFO("nand-mmio-read off=0x%08" PRIx64
+                  " size=%u val=0x%016" PRIx64,
+                  (uint64_t)offset, size, v);
         xms->nand_trace_reads++;
     }
     return v;
@@ -63,9 +70,9 @@ static void xenon_nand_write(void *opaque, hwaddr offset, uint64_t data, unsigne
     uint8_t buf[8];
 
     if (xms->trace_boot && xms->nand_trace_writes < 16) {
-        info_report("xbox360: nand-mmio-write off=0x%08" PRIx64
-                    " size=%u val=0x%016" PRIx64,
-                    (uint64_t)offset, size, data);
+        NAND_INFO("nand-mmio-write off=0x%08" PRIx64
+                  " size=%u val=0x%016" PRIx64,
+                  (uint64_t)offset, size, data);
         xms->nand_trace_writes++;
     }
 
@@ -153,9 +160,9 @@ static uint64_t xenon_nb_mmio_read(void *opaque, hwaddr offset, unsigned size)
         (offset == 0x15e0 || offset == 0x15e4 ||
          offset == 0x15e8 || offset == 0x15ec) &&
         xms->soc_trace_reads < 256) {
-        info_report("xbox360: nb-mmio-read off=0x%05" PRIx64
-                    " size=%u val=0x%016" PRIx64,
-                    (uint64_t)offset, size, v);
+        SOC_INFO("nb-mmio-read off=0x%05" PRIx64
+                 " size=%u val=0x%016" PRIx64,
+                 (uint64_t)offset, size, v);
         xms->soc_trace_reads++;
     }
     return v;
@@ -211,9 +218,9 @@ static void xenon_nb_mmio_write(void *opaque, hwaddr offset, uint64_t data, unsi
         (offset == 0x15e0 || offset == 0x15e4 ||
          offset == 0x15e8 || offset == 0x15ec) &&
         xms->soc_trace_writes < 256) {
-        info_report("xbox360: nb-mmio-write off=0x%05" PRIx64
-                    " size=%u val=0x%016" PRIx64,
-                    (uint64_t)offset, size, data);
+        SOC_INFO("nb-mmio-write off=0x%05" PRIx64
+                 " size=%u val=0x%016" PRIx64,
+                 (uint64_t)offset, size, data);
         xms->soc_trace_writes++;
     }
 }
@@ -271,9 +278,9 @@ static uint64_t xenon_smc_mmio_read(void *opaque, hwaddr offset, unsigned size)
         }
 
         if (should_log) {
-            info_report("xbox360: smc-read off=0x%03" PRIx64
-                        " size=%u val=0x%016" PRIx64,
-                        (uint64_t)offset, size, v);
+            SMC_INFO("smc-read off=0x%03" PRIx64
+                     " size=%u val=0x%016" PRIx64,
+                     (uint64_t)offset, size, v);
             xms->smc_trace_reads++;
         }
         xms->smc_last_status_valid = true;
@@ -298,9 +305,9 @@ static void xenon_smc_mmio_write(void *opaque, hwaddr offset, uint64_t data, uns
 
     if (xms->trace_boot && offset <= 0x94 &&
         xms->smc_trace_writes < XENON_SMC_TRACE_LIMIT) {
-        info_report("xbox360: smc-write off=0x%03" PRIx64
-                    " size=%u val=0x%016" PRIx64,
-                    (uint64_t)offset, size, data);
+        SMC_INFO("smc-write off=0x%03" PRIx64
+                 " size=%u val=0x%016" PRIx64,
+                 (uint64_t)offset, size, data);
         xms->smc_trace_writes++;
     }
     xenon_smc_write(&xms->smc_state, offset, data, size);
@@ -501,9 +508,9 @@ static uint64_t xenon_sfcx_read(void *opaque, hwaddr offset, unsigned size)
 
     if (xms->trace_boot && reg <= XENON_SFCX_REG_PHISON &&
         xms->sfcx_trace_reads < 128) {
-        info_report("xbox360: sfcx-read off=0x%03" PRIx32
-                    " size=%u val=0x%016" PRIx64,
-                    reg, size, v);
+        SATA_INFO("sfcx-read off=0x%03" PRIx32
+                  " size=%u val=0x%016" PRIx64,
+                  reg, size, v);
         xms->sfcx_trace_reads++;
     }
 
@@ -623,9 +630,9 @@ static void xenon_sfcx_write(void *opaque, hwaddr offset, uint64_t data, unsigne
 
     if (xms->trace_boot && reg <= XENON_SFCX_REG_PHISON &&
         xms->sfcx_trace_writes < 128) {
-        info_report("xbox360: sfcx-write off=0x%03" PRIx32
-                    " size=%u val=0x%016" PRIx64,
-                    reg, size, data);
+        SATA_INFO("sfcx-write off=0x%03" PRIx32
+                  " size=%u val=0x%016" PRIx64,
+                  reg, size, data);
         xms->sfcx_trace_writes++;
     }
 }
@@ -694,9 +701,9 @@ static uint64_t xenon_pci_cfg_read(void *opaque, hwaddr offset, unsigned size)
     if (xms->trace_boot &&
         offset >= 0x10000 && offset < 0x10100 &&
         xms->xgpu_trace_reads < 32) {
-        info_report("xbox360: xgpu-cfg-read off=0x%05" PRIx64
-                    " size=%u val=0x%016" PRIx64,
-                    (uint64_t)offset, size, v);
+        XGPU_INFO("xgpu-cfg-read off=0x%05" PRIx64
+                  " size=%u val=0x%016" PRIx64,
+                  (uint64_t)offset, size, v);
         xms->xgpu_trace_reads++;
     }
 
@@ -765,9 +772,9 @@ static void xenon_pci_cfg_write(void *opaque, hwaddr offset, uint64_t data, unsi
     if (xms->trace_boot &&
         offset >= 0x10000 && offset < 0x10100 &&
         xms->xgpu_trace_writes < 32) {
-        info_report("xbox360: xgpu-cfg-write off=0x%05" PRIx64
-                    " size=%u val=0x%016" PRIx64,
-                    (uint64_t)offset, size, data);
+        XGPU_INFO("xgpu-cfg-write off=0x%05" PRIx64
+                  " size=%u val=0x%016" PRIx64,
+                  (uint64_t)offset, size, data);
         xms->xgpu_trace_writes++;
     }
 }

@@ -36,6 +36,7 @@ void xenon_trace_on_post_observed(XenonMachineState *xms, uint64_t post_raw,
                                   uint8_t post, const char *desc, uint64_t ea,
                                   CPUPPCState *env);
 void xenon_pc_log_tick(void *opaque);
+void xenon_log_update_pc_timer(XenonMachineState *xms);
 
 /* qom.c (shared helper used for logging + getter) */
 const char *xenon_reason_to_boot_mode(uint8_t reason);
@@ -44,4 +45,3 @@ const char *xenon_reason_to_boot_mode(uint8_t reason);
 void xenon_init(MachineState *machine);
 
 #endif /* HW_PPC_XENON_MACHINE_PRIV_H */
-

@@ -19,7 +19,7 @@ UARTSystem = "print"
 
 [Boot]
 # Keep this off for normal runs; enable when collecting bring-up logs.
-TraceBoot = false
+TraceBoot = true
 PrettyPost = true
 Rgh2Patches = true
 # Temporary workaround for CD PANIC SHA_VERIFY (POST 0xB3). Keep false unless needed.

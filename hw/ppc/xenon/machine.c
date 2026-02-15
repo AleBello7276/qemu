@@ -16,6 +16,7 @@
 #include "system/system.h"
 #include "hw/ppc/xenon/config.h"
 #include "hw/ppc/xenon/machine-priv.h"
+#include "hw/ppc/xenon/debug.h"
 #include "hw/ppc/xenon/exceptions.h"
 #include "hw/ppc/xenon/iic.h"
 #include "hw/ppc/xenon/xgpu.h"
@@ -34,6 +35,70 @@
  * Purpose: allow a single config file to set artifact paths and bring-up flags
  * while still letting explicit `-M xbox360,...` properties override those values.
  */
+static void xenon_clear_watchpoints(XenonMachineState *xms)
+{
+    if (!xms) {
+        return;
+    }
+    for (unsigned i = 0; i < xms->pc_watchpoint_count; i++) {
+        g_free(xms->pc_watchpoints[i].label);
+        xms->pc_watchpoints[i].label = NULL;
+        xms->pc_watchpoints[i].triggered = false;
+        xms->pc_watchpoints[i].ea = 0;
+    }
+    xms->pc_watchpoint_count = 0;
+}
+
+static void xenon_apply_watchpoints(XenonMachineState *xms,
+                                    const GPtrArray *points)
+{
+    if (!xms) {
+        return;
+    }
+    xenon_clear_watchpoints(xms);
+    if (!points) {
+        return;
+    }
+    unsigned inserted = 0;
+    for (size_t i = 0; i < points->len && inserted < XENON_PC_WATCHPOINT_MAX; i++) {
+        XenonLogWatchEntry *entry = g_ptr_array_index(points, i);
+        xms->pc_watchpoints[inserted].ea = entry->ea;
+        xms->pc_watchpoints[inserted].label =
+            entry->label ? g_strdup(entry->label) : NULL;
+        xms->pc_watchpoints[inserted].triggered = false;
+        inserted++;
+    }
+    xms->pc_watchpoint_count = inserted;
+    if (points->len > XENON_PC_WATCHPOINT_MAX) {
+        warn_report("xbox360: ignoring extra WatchPC entries beyond %u",
+                    XENON_PC_WATCHPOINT_MAX);
+    }
+}
+
+void xenon_log_update_pc_timer(XenonMachineState *xms)
+{
+    if (!xms) {
+        return;
+    }
+    bool need_timer = xms->trace_boot ||
+                      xms->pc_watchpoint_count > 0 ||
+                      (xms->log_module_mask & XENON_LOG_MODULE_PC);
+    if (!need_timer) {
+        if (xms->pc_log_timer) {
+            timer_del(xms->pc_log_timer);
+            timer_free(xms->pc_log_timer);
+            xms->pc_log_timer = NULL;
+        }
+        return;
+    }
+    if (!xms->pc_log_timer) {
+        xms->pc_log_timer = timer_new_ms(QEMU_CLOCK_VIRTUAL,
+                                         xenon_pc_log_tick, xms);
+    }
+    timer_mod(xms->pc_log_timer,
+              qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + 50);
+}
+
 static void xenon_apply_config_file(XenonMachineState *xms)
 {
     XenonTomlConfig cfg = { 0 };
@@ -110,6 +175,34 @@ static void xenon_apply_config_file(XenonMachineState *xms)
         }
         xms->console_revision = (XenonConsoleRevision)cfg.console_revision;
     }
+
+    if (cfg.log_level) {
+        XenonLogLevel level = xms->log_level;
+        if (!xenon_log_level_from_string(cfg.log_level, &level)) {
+            error_report("xbox360: invalid LogLevel in config: %s", cfg.log_level);
+            exit(EXIT_FAILURE);
+        }
+        xms->log_level = level;
+    }
+    if (cfg.log_modules) {
+        bool ok = false;
+        uint32_t mask = xenon_log_modules_from_string(cfg.log_modules, &ok);
+        if (!ok) {
+            error_report("xbox360: invalid LogModules in config: %s", cfg.log_modules);
+            exit(EXIT_FAILURE);
+        }
+        xms->log_module_mask = mask;
+    }
+    if (cfg.have_stall_threshold && cfg.stall_threshold > 0) {
+        xms->pc_repeat_threshold = (unsigned)cfg.stall_threshold;
+    }
+    if (cfg.have_disasm_length && cfg.disasm_length > 0) {
+        xms->disasm_count = (unsigned)cfg.disasm_length;
+    }
+    if (cfg.watch_points) {
+        xenon_apply_watchpoints(xms, cfg.watch_points);
+    }
+    xenon_log_update_pc_timer(xms);
 
     xenon_toml_config_clear(&cfg);
 }
@@ -450,10 +543,7 @@ void xenon_init(MachineState *machine)
     xms->smc_last_status_valid = false;
     xms->smc_last_uart_status = 0;
     xms->rgh2_patches_applied = false;
-    if (xms->trace_boot) {
-        xms->pc_log_timer = timer_new_ms(QEMU_CLOCK_VIRTUAL, xenon_pc_log_tick, xms);
-        timer_mod(xms->pc_log_timer, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + 50);
-    }
+    xenon_log_update_pc_timer(xms);
 
     warn_report("xbox360: VMX128 is not implemented yet; boot path currently uses stubs/scaffold");
     info_report("xbox360: loaded nand='%s' (0x%zx), fuses='%s', 1bl='%s'",

@@ -11,6 +11,7 @@
 #include "qapi/error.h"
 #include "hw/boards.h"
 #include "hw/ppc/xenon/machine-priv.h"
+#include "hw/ppc/xenon/debug.h"
 
 /*
  * Convert a user-facing boot mode string to the SMC power-on reason byte.
@@ -411,6 +412,54 @@ static void xenon_machine_set_cd_sha_bypass(Object *obj, bool value, Error **err
     xms->user_set_cd_sha_bypass = true;
 }
 
+static char *xenon_machine_get_log_level(Object *obj, Error **errp)
+{
+    XenonMachineState *xms = XENON_MACHINE(obj);
+    return g_strdup(xenon_log_level_name(xms->log_level));
+}
+
+static void xenon_machine_set_log_level(Object *obj, const char *value,
+                                        Error **errp)
+{
+    XenonMachineState *xms = XENON_MACHINE(obj);
+    XenonLogLevel level;
+
+    if (!xenon_log_level_from_string(value, &level)) {
+        error_setg(errp,
+                   "xbox360: invalid log-level '%s' "
+                   "(expected off|error|warn|info|debug|trace)",
+                   value ? value : "");
+        return;
+    }
+    xenon_log_set_level(xms, level);
+    xenon_log_update_pc_timer(xms);
+}
+
+static char *xenon_machine_get_log_modules(Object *obj, Error **errp)
+{
+    XenonMachineState *xms = XENON_MACHINE(obj);
+    return xenon_log_modules_to_string(xms->log_module_mask);
+}
+
+static void xenon_machine_set_log_modules(Object *obj, const char *value,
+                                          Error **errp)
+{
+    XenonMachineState *xms = XENON_MACHINE(obj);
+    bool ok = false;
+    uint32_t mask = xenon_log_modules_from_string(value, &ok);
+
+    if (!ok) {
+        error_setg(errp,
+                   "xbox360: invalid log-modules '%s' (expecting comma-separated "
+                   "values from post,pc,nand,soc,seceng,smc,sata,xgpu,patch,boot,"
+                   "machine,iic,trace,all,none)",
+                   value ? value : "");
+        return;
+    }
+    xenon_log_set_modules(xms, mask);
+    xenon_log_update_pc_timer(xms);
+}
+
 /*
  * XenonMachineState instance initializer (constructor).
  *
@@ -461,6 +510,16 @@ static void xenon_machine_instance_init(Object *obj)
         xms->seceng_windows[i].fast_alias_name = NULL;
         xms->seceng_windows[i].fast_alias_enabled = false;
     }
+    xms->log_level = XENON_LOG_LEVEL_INFO;
+    xms->log_module_mask = XENON_LOG_MODULE_ALL;
+    xms->pc_repeat_threshold = 16384;
+    xms->disasm_count = 8;
+    xms->pc_watchpoint_count = 0;
+    for (unsigned i = 0; i < XENON_PC_WATCHPOINT_MAX; i++) {
+        xms->pc_watchpoints[i].ea = 0;
+        xms->pc_watchpoints[i].label = NULL;
+        xms->pc_watchpoints[i].triggered = false;
+    }
 }
 
 /*
@@ -496,6 +555,9 @@ static void xenon_machine_finalize(Object *obj)
     for (int i = 0; i < ARRAY_SIZE(xms->seceng_windows); i++) {
         g_free(xms->seceng_windows[i].name);
         g_free(xms->seceng_windows[i].fast_alias_name);
+    }
+    for (unsigned i = 0; i < xms->pc_watchpoint_count; i++) {
+        g_free(xms->pc_watchpoints[i].label);
     }
 }
 
@@ -580,6 +642,18 @@ static void xenon_machine_class_init(ObjectClass *oc, const void *data)
                                    xenon_machine_set_rgh2_patches);
     object_class_property_set_description(oc, "rgh2-patches",
                                           "Enable CB_A RGH2 compatibility register patches");
+
+    object_class_property_add_str(oc, "log-level",
+                                  xenon_machine_get_log_level,
+                                  xenon_machine_set_log_level);
+    object_class_property_set_description(oc, "log-level",
+                                          "Debug log level: off,error,warn,info,debug,trace");
+
+    object_class_property_add_str(oc, "log-modules",
+                                  xenon_machine_get_log_modules,
+                                  xenon_machine_set_log_modules);
+    object_class_property_set_description(oc, "log-modules",
+                                          "Comma-separated log modules (post,pc,nand,soc,seceng,smc,sata,xgpu,patch,boot,machine,iic,trace,all,none)");
 
     object_class_property_add_bool(oc, "cd-sha-bypass",
                                    xenon_machine_get_cd_sha_bypass,
