@@ -8,9 +8,9 @@
 #define HW_PPC_XENON_DEBUG_H
 
 #include "qemu/osdep.h"
+#include "target/ppc/cpu.h"
 
 typedef struct XenonMachineState XenonMachineState;
-typedef struct CPUPPCState CPUPPCState;
 
 #define XENON_PC_WATCHPOINT_MAX 16
 

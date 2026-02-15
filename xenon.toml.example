@@ -27,3 +27,17 @@ CdShaBypass = true
 # Alias (same effect): Rgh1Patches = true
 # ConsoleRevision: xenon|zephyr|falcon|jasper|trinity|corona|corona4gb|winchester (or 0..7)
 ConsoleRevision = "trinity"
+
+[Log]
+# Log Level: off | error | warn | info | debug | trace
+Level = "info"
+# Log Modules: comma-separated list or "all"/"none"
+# Modules: post, pc, nand, soc, seceng, smc, sata, xgpu, patch, boot, machine, iic, trace
+Modules = "all"
+# PC stall threshold before dumping disassembly
+StallThreshold = 16384
+# Instructions to dump on stall/watchpoint hits
+DisasmLength = 8
+# WatchPC entries can repeat; format is hex EA with optional label
+# WatchPC = 0x80000200:CB_Entry
+# WatchPC = 0x80001000

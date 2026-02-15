@@ -9,6 +9,7 @@
 
 #include "hw/boards.h"
 #include "hw/ppc/xenon/ata.h"
+#include "hw/ppc/xenon/debug.h"
 #include "hw/ppc/xenon/smc.h"
 #include "qemu/timer.h"
 #include "system/memory.h"
@@ -52,39 +53,6 @@
 #define XENON_HASH_BASE_HI          0x8000010000000000ULL
 #define XENON_SOC_BASE_HI           0x8000020000000000ULL
 #define XENON_ENCR_BASE_HI          0x8000030000000000ULL
-
-#define XENON_PC_WATCHPOINT_MAX     16
-
-typedef enum XenonLogLevel {
-    XENON_LOG_LEVEL_OFF = 0,
-    XENON_LOG_LEVEL_ERROR,
-    XENON_LOG_LEVEL_WARN,
-    XENON_LOG_LEVEL_INFO,
-    XENON_LOG_LEVEL_DEBUG,
-    XENON_LOG_LEVEL_TRACE,
-} XenonLogLevel;
-
-#define XENON_LOG_MODULE_NONE       0U
-#define XENON_LOG_MODULE_POST       (1U << 0)
-#define XENON_LOG_MODULE_PC         (1U << 1)
-#define XENON_LOG_MODULE_NAND       (1U << 2)
-#define XENON_LOG_MODULE_SOC        (1U << 3)
-#define XENON_LOG_MODULE_SECENG     (1U << 4)
-#define XENON_LOG_MODULE_SMC        (1U << 5)
-#define XENON_LOG_MODULE_SATA       (1U << 6)
-#define XENON_LOG_MODULE_XGPU       (1U << 7)
-#define XENON_LOG_MODULE_PATCH      (1U << 8)
-#define XENON_LOG_MODULE_BOOT       (1U << 9)
-#define XENON_LOG_MODULE_MACHINE    (1U << 10)
-#define XENON_LOG_MODULE_IIC        (1U << 11)
-#define XENON_LOG_MODULE_TRACE      (1U << 12)
-#define XENON_LOG_MODULE_ALL        ((1U << 13) - 1)
-
-typedef struct XenonPcWatchpoint {
-    uint64_t ea;
-    char *label;
-    bool triggered;
-} XenonPcWatchpoint;
 
 #define SPR_XENON_HID6              0x3F9
 #define SPR_XENON_PPE_TLB_INDEX_HINT 0x3B2

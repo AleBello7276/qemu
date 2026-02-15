@@ -8,8 +8,9 @@
 
 #include <glib.h>
 
+#include "qemu/error-report.h"
 #include "disas/disas.h"
-#include "disas-internal.h"
+#include "disas/disas-internal.h"
 #include "hw/core/cpu.h"
 #include "hw/ppc/xenon/debug.h"
 #include "hw/ppc/xenon/xenon-internal.h"

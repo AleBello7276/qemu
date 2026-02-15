@@ -94,6 +94,7 @@ ppc_ss.add(when: 'CONFIG_XBOX360', if_true: files(
   'xenon/ata.c',
   'xenon/boot.c',
   'xenon/config.c',
+  'xenon/debug.c',
   'xenon/display.c',
   'xenon/exceptions.c',
   'xenon/hana.c',

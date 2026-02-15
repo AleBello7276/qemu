@@ -205,6 +205,7 @@ bool xenon_toml_config_load(const char *path, XenonTomlConfig *cfg, Error **errp
         SEC_FILEPATHS,
         SEC_SMC,
         SEC_BOOT,
+        SEC_LOG,
     } sec = SEC_NONE;
 
     xenon_toml_config_clear(cfg);
@@ -242,6 +243,8 @@ bool xenon_toml_config_load(const char *path, XenonTomlConfig *cfg, Error **errp
                 sec = SEC_SMC;
             } else if (!g_ascii_strcasecmp(line, "boot")) {
                 sec = SEC_BOOT;
+            } else if (!g_ascii_strcasecmp(line, "log")) {
+                sec = SEC_LOG;
             } else {
                 sec = SEC_NONE;
             }
@@ -354,13 +357,13 @@ bool xenon_toml_config_load(const char *path, XenonTomlConfig *cfg, Error **errp
             }
             cfg->console_revision = v;
             cfg->have_console_revision = true;
-        } else if ((sec == SEC_BOOT || sec == SEC_NONE) &&
+        } else if ((sec == SEC_BOOT || sec == SEC_LOG || sec == SEC_NONE) &&
                    !g_ascii_strcasecmp(key, "LogLevel")) {
             xenon_set_str(&cfg->log_level, val);
-        } else if ((sec == SEC_BOOT || sec == SEC_NONE) &&
+        } else if ((sec == SEC_BOOT || sec == SEC_LOG || sec == SEC_NONE) &&
                    !g_ascii_strcasecmp(key, "LogModules")) {
             xenon_set_str(&cfg->log_modules, val);
-        } else if ((sec == SEC_BOOT || sec == SEC_NONE) &&
+        } else if ((sec == SEC_BOOT || sec == SEC_LOG || sec == SEC_NONE) &&
                    !g_ascii_strcasecmp(key, "StallThreshold")) {
             uint64_t v;
             if (qemu_strtou64(val, NULL, 0, &v) != 0) {
@@ -369,7 +372,7 @@ bool xenon_toml_config_load(const char *path, XenonTomlConfig *cfg, Error **errp
             }
             cfg->stall_threshold = (int64_t)v;
             cfg->have_stall_threshold = true;
-        } else if ((sec == SEC_BOOT || sec == SEC_NONE) &&
+        } else if ((sec == SEC_BOOT || sec == SEC_LOG || sec == SEC_NONE) &&
                    !g_ascii_strcasecmp(key, "DisasmLength")) {
             uint64_t v;
             if (qemu_strtou64(val, NULL, 0, &v) != 0) {
@@ -378,7 +381,7 @@ bool xenon_toml_config_load(const char *path, XenonTomlConfig *cfg, Error **errp
             }
             cfg->disasm_length = (int64_t)v;
             cfg->have_disasm_length = true;
-        } else if ((sec == SEC_BOOT || sec == SEC_NONE) &&
+        } else if ((sec == SEC_BOOT || sec == SEC_LOG || sec == SEC_NONE) &&
                    !g_ascii_strcasecmp(key, "WatchPC")) {
             if (!cfg->watch_points) {
                 cfg->watch_points = g_ptr_array_new_with_free_func(
@@ -388,7 +391,7 @@ bool xenon_toml_config_load(const char *path, XenonTomlConfig *cfg, Error **errp
             char *label = NULL;
             char *colon = strchr(watch, ':');
             if (colon) {
-                *colon = '\\0';
+                *colon = '\0';
                 char *trimmed = xenon_trim(colon + 1);
                 if (*trimmed) {
                     label = g_strdup(trimmed);
