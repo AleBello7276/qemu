@@ -4,10 +4,13 @@
 Nand = "/home/alexen/qemu360/nand/nand.bin"
 Fuses = "/home/alexen/qemu360/nand/fuses.txt"
 OneBL = "/home/alexen/qemu360/nand/1bl.bin"
+# Optional media images for XeLL/Linux paths (libxenon ATA/ATAPI)
+ODDImage = "/home/alexen/qemu360/nand/xenon.iso"
+# HDDImage = "/home/alexen/qemu360/nand/hdd.img"
 
 [SMC]
 # 0x11 = power button, 0x12 = eject button (XeLL usually needs 0x12)
-PowerOnType = 0x12
+PowerOnType = 0x11
 # AV pack reported by SMC_QUERY_AVPACK (xenon-emu default is 0x1f)
 AvPackType = 0x1f
 # UARTSystem: null | print | stdio | socket | vcom
@@ -19,5 +22,8 @@ UARTSystem = "print"
 TraceBoot = false
 PrettyPost = true
 Rgh2Patches = true
+# Temporary workaround for CD PANIC SHA_VERIFY (POST 0xB3). Keep false unless needed.
+CdShaBypass = true
+# Alias (same effect): Rgh1Patches = true
 # ConsoleRevision: xenon|zephyr|falcon|jasper|trinity|corona|corona4gb|winchester (or 0..7)
 ConsoleRevision = "trinity"

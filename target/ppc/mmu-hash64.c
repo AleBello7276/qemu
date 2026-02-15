@@ -27,6 +27,20 @@
 #include "system/memory.h"
 #include "kvm_ppc.h"
 #include "mmu-hash64.h"
+
+/*
+ * Xenon CD path programs SLB LLP=0x110 (64K segment base pages). PPC970's
+ * default hash64 options in this tree only model 4K/16M, so provide a local
+ * 64K decode profile instead of collapsing to 4K.
+ */
+static const PPCHash64SegmentPageSizes xenon_sps_64k = {
+    .page_shift = 16,
+    .slb_enc = SLB_VSID_64K,
+    .enc = {
+        { .page_shift = 16, .pte_enc = 0x1 },
+        { .page_shift = 24, .pte_enc = 0x8 },
+    },
+};
 #include "exec/log.h"
 #include "hw/hw.h"
 #include "internal.h"
@@ -53,10 +67,87 @@
  * Bridge this bootstrap window by mirroring 0x0100xxxx -> 0x0000xxxx once
  * those SPRs are populated.
  */
-#define SPR_XENON_PPE_TLB_INDEX 0x3B3
-#define SPR_XENON_PPE_TLB_VPN   0x3B4
-#define SPR_XENON_PPE_TLB_RPN   0x3B5
-#define SPR_XENON_HID6          0x3F9
+#define SPR_XENON_PPE_TLB_INDEX_HINT 0x3B2
+#define SPR_XENON_PPE_TLB_INDEX      0x3B3
+#define SPR_XENON_PPE_TLB_VPN        0x3B4
+#define SPR_XENON_PPE_TLB_RPN        0x3B5
+#define SPR_XENON_HID6               0x3F9
+
+#define XENON_HPTE64_RPN_NO_LP  0x000003fffffff000ULL
+#define XENON_HPTE64_RPN_LP     0x000003ffffffe000ULL
+
+#define XENON_SOFT_TLB_CLASSES     256
+#define XENON_SOFT_TLB_WAYS        4
+#define XENON_SOFT_TLB_STATE_SLOTS 8
+
+typedef struct XenonSoftTlbEntry {
+    bool valid;
+    uint8_t page_shift;
+    uint64_t page_mask;
+    uint64_t compare_mask;
+    uint64_t vpn;
+    uint64_t rpn;
+    uint64_t pte0;
+    uint64_t pte1;
+} XenonSoftTlbEntry;
+
+typedef struct XenonSoftTlbState {
+    bool in_use;
+    CPUPPCState *env;
+    XenonSoftTlbEntry ways[XENON_SOFT_TLB_CLASSES][XENON_SOFT_TLB_WAYS];
+} XenonSoftTlbState;
+
+static XenonSoftTlbState xenon_soft_tlb_states[XENON_SOFT_TLB_STATE_SLOTS];
+static inline bool xenon_bootstrap_sprs_present(CPUPPCState *env);
+
+static bool xenon_seceng_direct_map_fastpath(CPUPPCState *env, hwaddr *raddrp)
+{
+    uint64_t in;
+    uint64_t region;
+    hwaddr pa;
+
+    if (!xenon_bootstrap_sprs_present(env)) {
+        return false;
+    }
+    if (env->nip < 0x0000000004000000ULL) {
+        return false;
+    }
+
+    in = *raddrp;
+    region = (in & 0x00000F0000000000ULL) >> 32;
+    switch (region) {
+    case 0x100:
+    case 0x300:
+        pa = (hwaddr)((in & 0xFFFFFFFFULL) & 0x3FFFFFFFULL);
+        break;
+    case 0x200:
+        pa = (hwaddr)(in & 0xFFFFFFFFULL);
+        break;
+    default:
+        return false;
+    }
+
+    /*
+     * Keep low IIC/PRV windows on the seceng callback path, since those
+     * registers are not exposed as ordinary system-memory regions.
+     */
+    if ((pa >= 0x00050000ULL && pa < 0x00058000ULL) ||
+        (pa >= 0x00061000ULL && pa < 0x00061200ULL)) {
+        return false;
+    }
+
+    /*
+     * Keep the fastpath narrowly scoped to the hot CD RAM working-set.
+     * Wider remaps can bypass seceng callback semantics for SoC windows
+     * (for example SOC_E1/XGPU register handling), which breaks digest flow.
+     */
+    if (pa < 0x00100000ULL || pa >= 0x08000000ULL) {
+        return false;
+    }
+
+    *raddrp = pa;
+    return true;
+}
 
 static inline bool xenon_bootstrap_sprs_present(CPUPPCState *env)
 {
@@ -65,13 +156,322 @@ static inline bool xenon_bootstrap_sprs_present(CPUPPCState *env)
            env->spr_cb[SPR_XENON_PPE_TLB_RPN].name != NULL;
 }
 
+static XenonSoftTlbState *xenon_soft_tlb_state_get(CPUPPCState *env,
+                                                    bool create)
+{
+    int free_slot = -1;
+    int i;
+
+    for (i = 0; i < XENON_SOFT_TLB_STATE_SLOTS; i++) {
+        XenonSoftTlbState *state = &xenon_soft_tlb_states[i];
+
+        if (state->in_use && state->env == env) {
+            return state;
+        }
+        if (!state->in_use && free_slot < 0) {
+            free_slot = i;
+        }
+    }
+
+    if (!create || free_slot < 0) {
+        return NULL;
+    }
+
+    memset(&xenon_soft_tlb_states[free_slot], 0, sizeof(XenonSoftTlbState));
+    xenon_soft_tlb_states[free_slot].in_use = true;
+    xenon_soft_tlb_states[free_slot].env = env;
+    return &xenon_soft_tlb_states[free_slot];
+}
+
+static uint8_t xenon_soft_tlb_page_shift_from_hid6(uint64_t pte0, uint64_t pte1,
+                                                    uint64_t hid6)
+{
+    uint8_t lb;
+    uint8_t lp;
+    uint8_t idx;
+
+    if (!(pte0 & HPTE64_V_LARGE)) {
+        return 12;
+    }
+
+    /*
+     * Xenon uses HID6.LB to select large-page size:
+     * idx=0 -> 16MB, idx=1 -> 1MB, idx=2 -> 64KB, idx=3 -> 4KB.
+     * LP selects which LB pair to use.
+     */
+    lb = (hid6 >> 16) & 0xF;
+    lp = (pte1 >> 12) & 0x1;
+    idx = lp ? (lb & 0x3) : ((lb >> 2) & 0x3);
+    switch (idx) {
+    case 0:
+        return 24;
+    case 1:
+        return 20;
+    case 2:
+        return 16;
+    default:
+        return 12;
+    }
+}
+
+static int xenon_soft_tlb_way_from_set(uint8_t set_mask)
+{
+    switch (set_mask & 0xF) {
+    case 0x8:
+        return 0;
+    case 0x4:
+        return 1;
+    case 0x2:
+        return 2;
+    case 0x1:
+        return 3;
+    default:
+        return 0;
+    }
+}
+
+static uint8_t xenon_soft_tlb_set_from_way(int way)
+{
+    switch (way) {
+    case 0:
+        return 0x8;
+    case 1:
+        return 0x4;
+    case 2:
+        return 0x2;
+    default:
+        return 0x1;
+    }
+}
+
+static uint8_t xenon_soft_tlb_class_from_va(uint64_t va, uint8_t page_shift)
+{
+    uint8_t bits36_39 = (va >> 24) & 0xF;
+    uint8_t bits40_43 = (va >> 20) & 0xF;
+    uint8_t bits44_47 = (va >> 16) & 0xF;
+    uint8_t bits48_51 = (va >> 12) & 0xF;
+
+    switch (page_shift) {
+    case 16:
+        return (uint8_t)(((bits36_39 ^ bits40_43) << 4) | bits44_47);
+    case 24:
+        return (uint8_t)((va >> 24) & 0xFF);
+    default:
+        return (uint8_t)(((bits36_39 ^ bits44_47) << 4) | bits48_51);
+    }
+}
+
+static void xenon_soft_tlb_update_index_hint(CPUPPCState *env, uint64_t va,
+                                              uint8_t page_shift)
+{
+    XenonSoftTlbState *state;
+    uint8_t class_idx;
+    int way = 0;
+    uint64_t hint;
+    int i;
+
+    if (env->spr_cb[SPR_XENON_PPE_TLB_INDEX_HINT].name == NULL) {
+        return;
+    }
+
+    class_idx = xenon_soft_tlb_class_from_va(va, page_shift);
+    state = xenon_soft_tlb_state_get(env, false);
+    if (state) {
+        for (i = 0; i < XENON_SOFT_TLB_WAYS; i++) {
+            if (!state->ways[class_idx][i].valid) {
+                way = i;
+                break;
+            }
+        }
+    }
+
+    hint = ((uint64_t)class_idx << 4) | xenon_soft_tlb_set_from_way(way);
+    env->spr[SPR_XENON_PPE_TLB_INDEX_HINT] = hint;
+}
+
+static uint64_t xenon_soft_tlb_rpn_from_pte(uint64_t pte0, uint64_t pte1)
+{
+    if (pte0 & HPTE64_V_LARGE) {
+        return pte1 & XENON_HPTE64_RPN_LP;
+    }
+    return pte1 & XENON_HPTE64_RPN_NO_LP;
+}
+
+static uint64_t xenon_soft_tlb_compare_mask(uint8_t page_shift)
+{
+    if (page_shift >= 64) {
+        return 0;
+    }
+    return ~((1ULL << page_shift) - 1ULL);
+    
+    /*
+     * Xenon PPE software-managed TLB uses IBM CBE-style indexing formulas
+     * (see xenon-emu). Empirically the VPN compare mask is offset by 8 bits
+     * versus the raw byte page size.
+     *
+     * xenon-emu masks:
+     * 4KB  -> 0xFFFFFFFFFFF00000
+     * 64KB -> 0xFFFFFFFFFF000000
+     * 16MB -> 0xFFFFFFFF00000000
+     */
+    // unsigned shift = page_shift + 8;
+// 
+    // if (shift >= 63) {
+    //     return 0;
+    // }
+    // return ~((1ULL << shift) - 1ULL);
+}
+
+static void xenon_soft_tlb_commit_current(CPUPPCState *env)
+{
+    XenonSoftTlbState *state;
+    XenonSoftTlbEntry *entry;
+    uint64_t tlb_index;
+    uint64_t tlb_vpn;
+    uint64_t tlb_rpn;
+    uint64_t hid6;
+    uint64_t avpn;
+    uint64_t lvpn;
+    uint8_t page_shift;
+    uint8_t class_index;
+    int way;
+    if (!xenon_bootstrap_sprs_present(env)) {
+        return;
+    }
+
+    state = xenon_soft_tlb_state_get(env, true);
+    if (!state) {
+        return;
+    }
+
+    tlb_index = env->spr[SPR_XENON_PPE_TLB_INDEX];
+    tlb_vpn = env->spr[SPR_XENON_PPE_TLB_VPN];
+    tlb_rpn = env->spr[SPR_XENON_PPE_TLB_RPN];
+    class_index = (tlb_index >> 4) & 0xFF;
+    way = xenon_soft_tlb_way_from_set(tlb_index & 0xF);
+    entry = &state->ways[class_index][way];
+
+    memset(entry, 0, sizeof(*entry));
+    if (!(tlb_vpn & HPTE64_V_VALID)) {
+        return;
+    }
+
+    hid6 = env->spr[SPR_XENON_HID6];
+    page_shift = xenon_soft_tlb_page_shift_from_hid6(tlb_vpn, tlb_rpn, hid6);
+    avpn = (tlb_vpn & HPTE64_V_AVPN) << 16;
+    lvpn = (tlb_index & 0xE00000000000ULL) >> 25;
+
+    entry->valid = true;
+    entry->page_shift = page_shift;
+    entry->page_mask = (1ULL << page_shift) - 1ULL;
+    entry->compare_mask = xenon_soft_tlb_compare_mask(page_shift);
+    entry->vpn = (avpn | lvpn) & entry->compare_mask;
+    entry->rpn = xenon_soft_tlb_rpn_from_pte(tlb_vpn, tlb_rpn);
+    entry->pte0 = tlb_vpn;
+    entry->pte1 = tlb_rpn;
+}
+
+void ppc_xenon_soft_tlb_spr_sync(CPUPPCState *env, uint32_t sprn)
+{
+    if (!xenon_bootstrap_sprs_present(env)) {
+        return;
+    }
+
+    if (sprn == SPR_XENON_PPE_TLB_VPN ||
+        sprn == SPR_XENON_PPE_TLB_RPN) {
+        xenon_soft_tlb_commit_current(env);
+    }
+}
+
+static bool xenon_soft_tlb_lookup_class(XenonSoftTlbState *state,
+                                        CPUPPCState *env,
+                                        vaddr eaddr, uint8_t class_idx,
+                                        hwaddr *raddrp, int *psizep, int *protp)
+{
+    int way;
+
+    for (way = 0; way < XENON_SOFT_TLB_WAYS; way++) {
+        XenonSoftTlbEntry *entry = &state->ways[class_idx][way];
+
+        if (!entry->valid) {
+            continue;
+        }
+        if (((uint64_t)eaddr & entry->compare_mask) != entry->vpn) {
+            continue;
+        }
+
+        *raddrp = (hwaddr)(entry->rpn | ((uint64_t)eaddr & entry->page_mask));
+        xenon_seceng_direct_map_fastpath(env, raddrp);
+        *protp = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
+        *psizep = entry->page_shift;
+        return true;
+    }
+
+    return false;
+}
+
+static bool xenon_soft_tlb_lookup(CPUPPCState *env, vaddr eaddr,
+                                  hwaddr *raddrp, int *psizep, int *protp)
+{
+    XenonSoftTlbState *state = xenon_soft_tlb_state_get(env, false);
+    static const uint8_t candidate_shifts[] = { 24, 20, 16, 12 };
+    uint8_t probed[ARRAY_SIZE(candidate_shifts) + 1];
+    size_t probed_count = 0;
+    size_t i;
+
+    if (!state) {
+        return false;
+    }
+
+    if (env->spr_cb[SPR_XENON_PPE_TLB_INDEX_HINT].name != NULL) {
+        uint8_t class_idx =
+            (uint8_t)((env->spr[SPR_XENON_PPE_TLB_INDEX_HINT] >> 4) & 0xFF);
+
+        if (xenon_soft_tlb_lookup_class(state, env, eaddr, class_idx,
+                                        raddrp, psizep, protp)) {
+            return true;
+        }
+        probed[probed_count++] = class_idx;
+    }
+
+    /*
+     * Xenon TLB is indexed by congruence class; probe likely classes first.
+     * Probe a tiny deduplicated class set instead of materializing a 256-bit
+     * "seen" table on each lookup.
+     */
+    for (i = 0; i < ARRAY_SIZE(candidate_shifts); i++) {
+        uint8_t class_idx =
+            xenon_soft_tlb_class_from_va((uint64_t)eaddr, candidate_shifts[i]);
+        bool duplicate = false;
+        size_t j;
+
+        for (j = 0; j < probed_count; j++) {
+            if (probed[j] == class_idx) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate) {
+            continue;
+        }
+        if (probed_count < ARRAY_SIZE(probed)) {
+            probed[probed_count++] = class_idx;
+        }
+        if (xenon_soft_tlb_lookup_class(state, env, eaddr, class_idx,
+                                        raddrp, psizep, protp)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 static bool xenon_soft_tlb_spr_xlate(CPUPPCState *env, vaddr eaddr,
                                      hwaddr *raddrp, int *psizep, int *protp)
 {
-    uint64_t pte0, pte1, vpn, rpn, page_mask;
+    uint64_t pte0, pte1, tlb_index;
+    uint64_t avpn, lvpn, vpn, rpn, page_mask, compare_mask;
     unsigned page_shift;
-    uint64_t hid6;
-    uint8_t lb, lp, idx;
 
     if (!xenon_bootstrap_sprs_present(env)) {
         return false;
@@ -84,12 +484,13 @@ static bool xenon_soft_tlb_spr_xlate(CPUPPCState *env, vaddr eaddr,
     if (eaddr & 0xFFFFFFFF00000000ULL) {
         return false;
     }
-    if (eaddr < 0x20000000ULL) {
+    if (eaddr < 0x20000000ULL && env->nip < 0x04000000ULL) {
         return false;
     }
 
     pte0 = env->spr[SPR_XENON_PPE_TLB_VPN];
     pte1 = env->spr[SPR_XENON_PPE_TLB_RPN];
+    tlb_index = env->spr[SPR_XENON_PPE_TLB_INDEX];
     if (!(pte0 & HPTE64_V_VALID)) {
         return false;
     }
@@ -99,43 +500,27 @@ static bool xenon_soft_tlb_spr_xlate(CPUPPCState *env, vaddr eaddr,
      * SPRs. Keep a minimal fast-path from those SPRs so CD can fetch from
      * 0x8000xxxx before full hash page-table setup is complete.
      */
-    page_shift = 12;
-    if (pte0 & HPTE64_V_LARGE) {
-        /*
-         * Xenon uses HID6.LB to select large-page size:
-         * idx=0 -> 16MB, idx=1 -> 1MB, idx=2 -> 64KB, idx=3 -> 4KB.
-         * LP selects which LB pair to use.
-         */
-        hid6 = env->spr[SPR_XENON_HID6];
-        lb = (hid6 >> 16) & 0xF;
-        lp = (pte1 >> 12) & 0x1;
-        idx = lp ? (lb & 0x3) : ((lb >> 2) & 0x3);
-        switch (idx) {
-        case 0:
-            page_shift = 24;
-            break;
-        case 1:
-            page_shift = 20;
-            break;
-        case 2:
-            page_shift = 16;
-            break;
-        default:
-            page_shift = 12;
-            break;
-        }
-    }
+    page_shift = xenon_soft_tlb_page_shift_from_hid6(
+        pte0, pte1, env->spr[SPR_XENON_HID6]);
     page_mask = (1ULL << page_shift) - 1ULL;
-    vpn = ((pte0 & HPTE64_V_AVPN) << 16) & ~page_mask;
-    rpn = (pte1 & HPTE64_R_RPN) & ~page_mask;
+    compare_mask = xenon_soft_tlb_compare_mask(page_shift);
+    avpn = (pte0 & HPTE64_V_AVPN) << 16;
+    lvpn = (tlb_index & 0xE00000000000ULL) >> 25;
+    vpn = (avpn | lvpn) & compare_mask;
+    rpn = xenon_soft_tlb_rpn_from_pte(pte0, pte1);
 
-    if ((eaddr & ~page_mask) != vpn) {
+    if (((uint64_t)eaddr & compare_mask) != vpn) {
+        if (xenon_soft_tlb_lookup(env, eaddr, raddrp, psizep, protp)) {
+            return true;
+        }
+        xenon_soft_tlb_update_index_hint(env, (uint64_t)eaddr, page_shift);
         return false;
     }
 
     *raddrp = (hwaddr)(rpn | (eaddr & page_mask));
+    xenon_seceng_direct_map_fastpath(env, raddrp);
     *protp = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
-    *psizep = TARGET_PAGE_BITS;
+    *psizep = page_shift;
     return true;
 }
 
@@ -167,9 +552,13 @@ static bool xenon_bootstrap_tlb_xlate(CPUPPCState *env, vaddr eaddr,
     if ((env->spr[SPR_XENON_PPE_TLB_INDEX] |
          env->spr[SPR_XENON_PPE_TLB_VPN] |
          env->spr[SPR_XENON_PPE_TLB_RPN]) != 0 &&
-        (eaddr < 0x00800000ULL ||
-         (eaddr >= 0x10000000ULL && eaddr < 0x20000000ULL))) {
-        *raddrp = (hwaddr)eaddr;
+        ((eaddr >= 0x10000000ULL && eaddr < 0x20000000ULL) ||
+         (env->nip < 0x04000000ULL && eaddr < 0x00800000ULL))) {
+        if (eaddr >= 0x10000000ULL && eaddr < 0x20000000ULL) {
+            *raddrp = (hwaddr)(eaddr & 0x0FFFFFFFULL);
+        } else {
+            *raddrp = (hwaddr)eaddr;
+        }
         *protp = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
         *psizep = TARGET_PAGE_BITS;
         return true;
@@ -432,15 +821,28 @@ int ppc_store_slb(PowerPCCPU *cpu, target_ulong slot,
          */
         if ((env->spr[SPR_XENON_PPE_TLB_INDEX] |
              env->spr[SPR_XENON_PPE_TLB_VPN] |
-             env->spr[SPR_XENON_PPE_TLB_RPN]) != 0 &&
-            cpu->hash64_opts->sps[0].page_shift) {
-            sps = &cpu->hash64_opts->sps[0];
-            qemu_log_mask(LOG_GUEST_ERROR,
-                          "xenon: remapping unknown SLB LLP slot " TARGET_FMT_lu
-                          " esid=0x" TARGET_FMT_lx " vsid=0x" TARGET_FMT_lx
-                          " to 4K page size\n",
-                          slot, esid, vsid);
-        } else {
+             env->spr[SPR_XENON_PPE_TLB_RPN]) != 0) {
+            target_ulong llp = vsid & SLB_VSID_LLP_MASK;
+
+            if (llp == SLB_VSID_64K) {
+                sps = &xenon_sps_64k;
+                qemu_log_mask(LOG_GUEST_ERROR,
+                              "xenon: remapping SLB LLP=0x" TARGET_FMT_lx
+                              " slot " TARGET_FMT_lu
+                              " esid=0x" TARGET_FMT_lx " vsid=0x" TARGET_FMT_lx
+                              " to 64K profile\n",
+                              llp, slot, esid, vsid);
+            } else if (cpu->hash64_opts->sps[0].page_shift) {
+                sps = &cpu->hash64_opts->sps[0];
+                qemu_log_mask(LOG_GUEST_ERROR,
+                              "xenon: remapping unknown SLB LLP slot " TARGET_FMT_lu
+                              " esid=0x" TARGET_FMT_lx " vsid=0x" TARGET_FMT_lx
+                              " to 4K page size\n",
+                              slot, esid, vsid);
+            }
+        }
+
+        if (!sps) {
             error_report("Bad page size encoding in SLB store: slot " TARGET_FMT_lu
                          " esid 0x" TARGET_FMT_lx " vsid 0x" TARGET_FMT_lx,
                          slot, esid, vsid);
@@ -1190,6 +1592,19 @@ bool ppc_hash64_xlate(PowerPCCPU *cpu, vaddr eaddr, MMUAccessType access_type,
          */
         raddr = eaddr & 0x0FFFFFFFFFFFFFFFULL;
 
+        /*
+         * Xenon real-mode software frequently uses 0x8xxxxxxx/0x9xxxxxxx
+         * aliases for the 512MB physical RAM aperture.
+         */
+        if (xenon_bootstrap_sprs_present(env) &&
+            (eaddr & 0xFFFFFFFF00000000ULL) == 0 &&
+            (eaddr & 0xE0000000ULL) == 0x80000000ULL) {
+            *raddrp = (hwaddr)(eaddr & 0x1FFFFFFFULL);
+            *protp = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
+            *psizep = TARGET_PAGE_BITS;
+            return true;
+        }
+
         if (cpu->vhyp) {
             /*
              * In virtual hypervisor mode, there's nothing to do:
@@ -1254,6 +1669,7 @@ bool ppc_hash64_xlate(PowerPCCPU *cpu, vaddr eaddr, MMUAccessType access_type,
         }
 
         *raddrp = raddr;
+        xenon_seceng_direct_map_fastpath(env, raddrp);
         *protp = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
         *psizep = TARGET_PAGE_BITS;
         return true;
@@ -1392,6 +1808,7 @@ bool ppc_hash64_xlate(PowerPCCPU *cpu, vaddr eaddr, MMUAccessType access_type,
     /* 7. Determine the real address from the PTE */
 
     *raddrp = deposit64(pte.pte1 & HPTE64_R_RPN, 0, apshift, eaddr);
+    xenon_seceng_direct_map_fastpath(env, raddrp);
     *protp = prot;
     *psizep = apshift;
     return true;

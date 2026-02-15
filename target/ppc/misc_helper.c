@@ -25,6 +25,7 @@
 #include "qemu/error-report.h"
 #include "qemu/main-loop.h"
 #include "mmu-book3s-v3.h"
+#include "mmu-hash64.h"
 #include "hw/ppc/ppc.h"
 
 #include "helper_regs.h"
@@ -84,6 +85,10 @@ void helper_spr_write_CTRL(CPUPPCState *env, uint32_t sprn,
     }
 }
 
+void helper_xenon_tlb_spr_sync(CPUPPCState *env, uint32_t sprn)
+{
+    ppc_xenon_soft_tlb_spr_sync(env, sprn);
+}
 
 #ifdef TARGET_PPC64
 static void raise_hv_fu_exception(CPUPPCState *env, uint32_t bit,

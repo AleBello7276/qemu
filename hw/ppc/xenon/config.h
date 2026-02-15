@@ -14,6 +14,8 @@ typedef struct XenonTomlConfig {
     char *nand;
     char *fuses;
     char *onebl;
+    char *odd_image;
+    char *hdd_image;
     char *smc_uart;
     int64_t power_on_type;
     bool have_power_on_type;
@@ -25,6 +27,8 @@ typedef struct XenonTomlConfig {
     bool have_pretty_post;
     bool rgh2_patches;
     bool have_rgh2_patches;
+    bool cd_sha_bypass;
+    bool have_cd_sha_bypass;
     int64_t console_revision;
     bool have_console_revision;
 } XenonTomlConfig;

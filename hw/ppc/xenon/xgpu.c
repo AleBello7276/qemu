@@ -55,16 +55,36 @@
 #define XGPU_REG_MPLL_CNTL              0x00A1
 #define XGPU_REG_MDLL_CNTL1             0x00A3
 
+#define XGPU_MH_STATUS_READY_BIT        0x02000000U
+#define XGPU_D1MODE_V_COUNTER_DEFAULT   720U
+
+/*
+ * Load a 32-bit big-endian XGPU register from the MMIO shadow buffer.
+ *
+ * Purpose: centralize register indexing and endian handling for the XGPU model.
+ */
 static inline uint32_t xenon_xgpu_load32(XenonMachineState *xms, uint32_t reg)
 {
     return ldl_be_p(xms->xgpu_mmio_data + ((hwaddr)reg << 2));
 }
 
+/*
+ * Store a 32-bit big-endian XGPU register into the MMIO shadow buffer.
+ *
+ * Purpose: keep the shadow buffer authoritative for non-special registers and
+ * provide deterministic readback.
+ */
 static inline void xenon_xgpu_store32(XenonMachineState *xms, uint32_t reg, uint32_t v)
 {
     stl_be_p(xms->xgpu_mmio_data + ((hwaddr)reg << 2), v);
 }
 
+/*
+ * Select XGPU device/revision profile based on console motherboard revision.
+ *
+ * Purpose: some PCI IDs / register availability differ across revisions; keep
+ * behavior aligned with xenon-emu baselines.
+ */
 static void xenon_xgpu_profile(XenonConsoleRevision rev,
                                uint16_t *device_id,
                                uint8_t *rev_id,
@@ -114,6 +134,12 @@ static void xenon_xgpu_profile(XenonConsoleRevision rev,
     }
 }
 
+/*
+ * Reset XGPU state to power-on defaults.
+ *
+ * Purpose: seed the minimal register set and microcode buffers needed for
+ * libxenon/XeLL bring-up, and log the selected profile when tracing.
+ */
 void xenon_xgpu_reset(XenonMachineState *xms)
 {
     bool has_mdll_cntl1;
@@ -136,9 +162,10 @@ void xenon_xgpu_reset(XenonMachineState *xms)
      * libxenon video init polls MH_STATUS bit1 at BAR0+0x281c, while
      * existing warm-boot paths also observe the high ready bit.
      */
-    xenon_xgpu_store32(xms, XGPU_REG_MH_STATUS, 0x02000002U);
+    xenon_xgpu_store32(xms, XGPU_REG_MH_STATUS, XGPU_MH_STATUS_READY_BIT);
     xenon_xgpu_store32(xms, XGPU_REG_CP_ME_STATUS, 0x00000000U);
     xenon_xgpu_store32(xms, XGPU_REG_COHER_STATUS_HOST, 0x80000000U);
+    xenon_xgpu_store32(xms, XGPU_REG_D1MODE_V_COUNTER, XGPU_D1MODE_V_COUNTER_DEFAULT);
     xenon_xgpu_store32(xms, XGPU_REG_D1MODE_VBLANK_VLINE_STATUS, 0x00000001U);
     xenon_xgpu_store32(xms, XGPU_REG_D1MODE_VIEWPORT_SIZE, 0x050002D0U);
     xenon_xgpu_store32(xms, XGPU_REG_RB_EDRAM_TIMING, 0x00060000U);
@@ -158,6 +185,12 @@ void xenon_xgpu_reset(XenonMachineState *xms)
     }
 }
 
+/*
+ * Initialize the XGPU portion of the PCI config shadow.
+ *
+ * Purpose: expose plausible vendor/device/class/revision IDs so guest code that
+ * enumerates PCI sees an XGPU-like device.
+ */
 void xenon_xgpu_init_pci_config(XenonMachineState *xms)
 {
     bool has_mdll_cntl1;
@@ -175,6 +208,12 @@ void xenon_xgpu_init_pci_config(XenonMachineState *xms)
     stl_le_p(xms->pci_cfg_data + 0x100DC, 0x0000C421U);
 }
 
+/*
+ * Read a 32-bit value from the XGPU MMIO model.
+ *
+ * Purpose: implement special-case register semantics (status bits, ucode FIFO,
+ * ready flags) while falling back to the MMIO shadow for ordinary registers.
+ */
 uint32_t xenon_xgpu_mmio_read32(XenonMachineState *xms, hwaddr off)
 {
     uint32_t reg = XGPU_REG(off);
@@ -194,11 +233,15 @@ uint32_t xenon_xgpu_mmio_read32(XenonMachineState *xms, hwaddr off)
         xenon_xgpu_store32(xms, reg, v);
         break;
     case XGPU_REG_RBBM_DEBUG:
-        v = 0x000F0000U;
-        xenon_xgpu_store32(xms, reg, v);
+        /*
+         * xenon-emu returns the latched register value here.
+         */
         break;
     case XGPU_REG_MH_STATUS:
-        v |= 0x02000002U;
+        /*
+         * Preserve guest-controlled low bits, force the MH ready bit.
+         */
+        v |= XGPU_MH_STATUS_READY_BIT;
         xenon_xgpu_store32(xms, reg, v);
         break;
     case XGPU_REG_CP_ME_STATUS:
@@ -228,19 +271,12 @@ uint32_t xenon_xgpu_mmio_read32(XenonMachineState *xms, hwaddr off)
         }
         break;
     case XGPU_REG_D1MODE_V_COUNTER:
-        v = 720U;
         break;
     case XGPU_REG_D1MODE_VBLANK_STATUS: {
         int64_t us = qemu_clock_get_us(QEMU_CLOCK_VIRTUAL);
         v = ((us % 16667) < 500) ? 0x0000FFFFU : 0x00000000U;
         break;
     }
-    case XGPU_REG_D1MODE_VBLANK_VLINE_STATUS:
-        if (!v) {
-            v = 0x00000001U;
-            xenon_xgpu_store32(xms, reg, v);
-        }
-        break;
     default:
         break;
     }
@@ -248,6 +284,13 @@ uint32_t xenon_xgpu_mmio_read32(XenonMachineState *xms, hwaddr off)
     return v;
 }
 
+/*
+ * Write a 32-bit value to the XGPU MMIO model.
+ *
+ * Purpose: accept guest register writes and apply modeled side effects (reset
+ * behavior, MH ready enforcement, ucode RAM ports), while keeping the shadow
+ * buffer in sync.
+ */
 void xenon_xgpu_mmio_write32(XenonMachineState *xms, hwaddr off, uint32_t v)
 {
     uint32_t reg = XGPU_REG(off);
@@ -262,7 +305,10 @@ void xenon_xgpu_mmio_write32(XenonMachineState *xms, hwaddr off, uint32_t v)
         }
         break;
     case XGPU_REG_MH_STATUS:
-        v |= 0x02000002U;
+        /*
+         * Match xenon-emu: preserve guest value but keep MH ready set.
+         */
+        v |= XGPU_MH_STATUS_READY_BIT;
         xenon_xgpu_store32(xms, reg, v);
         break;
     case XGPU_REG_RB_EDRAM_TIMING:
@@ -303,10 +349,22 @@ void xenon_xgpu_mmio_write32(XenonMachineState *xms, hwaddr off, uint32_t v)
         }
         break;
     case XGPU_REG_RBBM_CNTL:
-    case XGPU_REG_D1CRTC_CONTROL:
     case XGPU_REG_DC_LUT_AUTOFILL:
         if (v == 0x00000001U || v == 0x01000000U) {
             xenon_xgpu_store32(xms, reg, 0x00000002U);
+        }
+        break;
+    case XGPU_REG_D1CRTC_CONTROL:
+        /*
+         * libxenon/xell writes bit24 on D1CRTC_CONTROL (BAR0+0x6028) and
+         * then polls MH_STATUS bit1 (BAR0+0x281c). Model the resulting MH
+         * handshake instead of seeding bit1 at reset.
+         */
+        if (v & 0x01000000U) {
+            uint32_t mh = xenon_xgpu_load32(xms, XGPU_REG_MH_STATUS);
+            mh |= 0x00000002U;
+            mh |= XGPU_MH_STATUS_READY_BIT;
+            xenon_xgpu_store32(xms, XGPU_REG_MH_STATUS, mh);
         }
         break;
     case XGPU_REG_D1MODE_V_COUNTER:
@@ -335,6 +393,12 @@ void xenon_xgpu_mmio_write32(XenonMachineState *xms, hwaddr off, uint32_t v)
     }
 }
 
+/*
+ * Extract the guest scanout framebuffer parameters from XGPU registers.
+ *
+ * Purpose: used by the debug display path to mirror the guest's Xenos scanout
+ * surface into a QEMU console during XeLL/libxenon bring-up.
+ */
 bool xenon_xgpu_get_fb_info(XenonMachineState *xms, XenonXgpuFbInfo *info)
 {
     uint32_t viewport;

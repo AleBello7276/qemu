@@ -145,6 +145,13 @@ static const uint32_t hana_state_fat[XENON_HANA_REG_COUNT] = {
   0x00000000, 0x00000000, 0x00010001, 0x00000000, // f8
 };
 
+/*
+ * Reset the ANA/HANA register shadow image to a console-revision-specific
+ * baseline.
+ *
+ * Purpose: provide the register values XeLL/libxenon expect during early video
+ * bring-up, matching xenon-emu's observed defaults for fat vs slim revisions.
+ */
 void xenon_hana_reset(uint32_t regs[XENON_HANA_REG_COUNT],
                       uint8_t console_revision)
 {
@@ -182,12 +189,24 @@ void xenon_hana_reset(uint32_t regs[XENON_HANA_REG_COUNT],
     }
 }
 
+/*
+ * Read a single ANA/HANA register from the shadow array.
+ *
+ * Purpose: keep a simple, deterministic register model for bring-up until a
+ * full device model is needed.
+ */
 uint32_t xenon_hana_read(const uint32_t regs[XENON_HANA_REG_COUNT],
                          uint8_t addr)
 {
     return regs[addr];
 }
 
+/*
+ * Write a single ANA/HANA register in the shadow array.
+ *
+ * Purpose: capture guest-programmed values for later reads (and for any debug
+ * display logic that consults the register image).
+ */
 void xenon_hana_write(uint32_t regs[XENON_HANA_REG_COUNT], uint8_t addr,
                       uint32_t value)
 {

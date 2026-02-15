@@ -6,7 +6,11 @@
 #ifndef ACCEL_TCG_TLB_BOUNDS_H
 #define ACCEL_TCG_TLB_BOUNDS_H
 
-#define CPU_TLB_DYN_MIN_BITS 6
+/*
+ * Keep a 256-entry minimum to avoid pathological conflict misses after
+ * dynamic downsizing on direct-mapped TLB fast paths.
+ */
+#define CPU_TLB_DYN_MIN_BITS 10
 #define CPU_TLB_DYN_MAX_BITS (32 - TARGET_PAGE_BITS)
 #define CPU_TLB_DYN_DEFAULT_BITS 8
 

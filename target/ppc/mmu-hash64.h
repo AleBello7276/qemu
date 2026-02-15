@@ -17,6 +17,7 @@ unsigned ppc_hash64_hpte_page_shift_noslb(PowerPCCPU *cpu,
                                           uint64_t pte0, uint64_t pte1);
 void ppc_hash64_init(PowerPCCPU *cpu);
 void ppc_hash64_finalize(PowerPCCPU *cpu);
+void ppc_xenon_soft_tlb_spr_sync(CPUPPCState *env, uint32_t sprn);
 #endif
 
 /*

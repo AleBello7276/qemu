@@ -9,6 +9,12 @@
 #include "qemu/error-report.h"
 #include "hw/ppc/xenon/config.h"
 
+/*
+ * Trim leading and trailing ASCII whitespace in-place.
+ *
+ * Purpose: normalize config file tokens (keys/values/sections) without
+ * allocating new strings.
+ */
 static char *xenon_trim(char *s)
 {
     while (*s && g_ascii_isspace(*s)) {
@@ -24,12 +30,24 @@ static char *xenon_trim(char *s)
     return s;
 }
 
+/*
+ * Replace a heap-owned string field.
+ *
+ * Purpose: centralize ownership rules for XenonTomlConfig strings (free old,
+ * duplicate new).
+ */
 static void xenon_set_str(char **dst, const char *src)
 {
     g_free(*dst);
     *dst = g_strdup(src);
 }
 
+/*
+ * Parse a boolean value from common TOML-ish representations.
+ *
+ * Purpose: accept tolerant inputs ("true/false", "on/off", "1/0") while keeping
+ * config parsing simple.
+ */
 static bool xenon_parse_bool(const char *s, bool *out)
 {
     if (!g_ascii_strcasecmp(s, "true") || !strcmp(s, "1") ||
@@ -45,6 +63,12 @@ static bool xenon_parse_bool(const char *s, bool *out)
     return false;
 }
 
+/*
+ * Parse PowerOnType (SMC "reason") selection.
+ *
+ * Purpose: map human-friendly strings ("power", "eject") to the numeric values
+ * expected by the Xenon boot ROM / kernel path selection.
+ */
 static bool xenon_parse_power_on_type(const char *s, int64_t *out)
 {
     uint64_t v;
@@ -64,6 +88,12 @@ static bool xenon_parse_power_on_type(const char *s, int64_t *out)
     return false;
 }
 
+/*
+ * Parse console revision selection.
+ *
+ * Purpose: accept named revisions (xenon/zephyr/...) as well as numeric values,
+ * to drive strap-derived differences (eg SFCX geometry fields).
+ */
 static bool xenon_parse_console_revision(const char *s, int64_t *out)
 {
     uint64_t v;
@@ -108,6 +138,11 @@ static bool xenon_parse_console_revision(const char *s, int64_t *out)
     return false;
 }
 
+/*
+ * Trim and remove matching single/double quotes around a value.
+ *
+ * Purpose: allow `Key="value"` / `Key='value'` in the simple config format.
+ */
 static char *xenon_unquote(char *v)
 {
     v = xenon_trim(v);
@@ -120,15 +155,29 @@ static char *xenon_unquote(char *v)
     return v;
 }
 
+/*
+ * Free heap-owned fields and reset the config struct to defaults.
+ *
+ * Purpose: allow `xenon_toml_config_load()` to reuse a config object safely.
+ */
 void xenon_toml_config_clear(XenonTomlConfig *cfg)
 {
     g_free(cfg->nand);
     g_free(cfg->fuses);
     g_free(cfg->onebl);
+    g_free(cfg->odd_image);
+    g_free(cfg->hdd_image);
     g_free(cfg->smc_uart);
     memset(cfg, 0, sizeof(*cfg));
 }
 
+/*
+ * Load and parse the Xenon machine config file.
+ *
+ * Purpose: translate the user-provided TOML-ish config into a XenonTomlConfig
+ * struct that board init uses to locate artifacts (nand/fuses/1bl/...) and
+ * configure bring-up flags (trace-boot/pretty-post/patch toggles).
+ */
 bool xenon_toml_config_load(const char *path, XenonTomlConfig *cfg, Error **errp)
 {
     g_autofree char *contents = NULL;
@@ -210,6 +259,14 @@ bool xenon_toml_config_load(const char *path, XenonTomlConfig *cfg, Error **errp
         } else if ((sec == SEC_FILEPATHS || sec == SEC_NONE) &&
                    (!g_ascii_strcasecmp(key, "OneBL") || !g_ascii_strcasecmp(key, "onebl"))) {
             xenon_set_str(&cfg->onebl, val);
+        } else if ((sec == SEC_FILEPATHS || sec == SEC_NONE) &&
+                   (!g_ascii_strcasecmp(key, "ODDImage") ||
+                    !g_ascii_strcasecmp(key, "OddImage"))) {
+            xenon_set_str(&cfg->odd_image, val);
+        } else if ((sec == SEC_FILEPATHS || sec == SEC_NONE) &&
+                   (!g_ascii_strcasecmp(key, "HDDImage") ||
+                    !g_ascii_strcasecmp(key, "HddImage"))) {
+            xenon_set_str(&cfg->hdd_image, val);
         } else if ((sec == SEC_SMC || sec == SEC_NONE) &&
                    !g_ascii_strcasecmp(key, "PowerOnType")) {
             int64_t v;
@@ -261,6 +318,16 @@ bool xenon_toml_config_load(const char *path, XenonTomlConfig *cfg, Error **errp
             }
             cfg->rgh2_patches = b;
             cfg->have_rgh2_patches = true;
+        } else if ((sec == SEC_BOOT || sec == SEC_NONE) &&
+                   (!g_ascii_strcasecmp(key, "CdShaBypass") ||
+                    !g_ascii_strcasecmp(key, "Rgh1Patches"))) {
+            bool b;
+            if (!xenon_parse_bool(val, &b)) {
+                error_setg(errp, "invalid %s at line %d", key, i + 1);
+                return false;
+            }
+            cfg->cd_sha_bypass = b;
+            cfg->have_cd_sha_bypass = true;
         } else if ((sec == SEC_BOOT || sec == SEC_NONE) &&
                    (!g_ascii_strcasecmp(key, "ConsoleRevision") ||
                     !g_ascii_strcasecmp(key, "ConsoleRevison"))) {

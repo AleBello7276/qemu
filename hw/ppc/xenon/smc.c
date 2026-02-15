@@ -61,6 +61,12 @@
 #define SMC_DDC_REG_DATA    0xF4
 #define SMC_DDC_STATUS_BUSY 0x10
 
+/*
+ * Store a little-endian integer into a byte buffer of size 1/2/4/8.
+ *
+ * Purpose: SMC registers are modeled as little-endian and accessed at varying
+ * widths; centralize packing for consistent behavior.
+ */
 static void xenon_smc_copy_le_out(uint8_t *dst, uint64_t data, unsigned size)
 {
     switch (size) {
@@ -81,6 +87,11 @@ static void xenon_smc_copy_le_out(uint8_t *dst, uint64_t data, unsigned size)
     }
 }
 
+/*
+ * Load a little-endian integer from a byte buffer of size 1/2/4/8.
+ *
+ * Purpose: companion to xenon_smc_copy_le_out() for register reads.
+ */
 static uint64_t xenon_smc_copy_le_in(const uint8_t *src, unsigned size)
 {
     switch (size) {
@@ -97,6 +108,12 @@ static uint64_t xenon_smc_copy_le_in(const uint8_t *src, unsigned size)
     }
 }
 
+/*
+ * Initialize a minimal, valid EDID image for the SMC DDC emulation.
+ *
+ * Purpose: XeLL/libxenon display init expects DDC/EDID to respond with a valid
+ * base block; this provides a stable stub.
+ */
 static void xenon_smc_init_ddc_edid(XenonSmcState *smc)
 {
     uint8_t sum = 0;
@@ -133,11 +150,23 @@ static void xenon_smc_init_ddc_edid(XenonSmcState *smc)
     smc->ddc_edid[127] = (uint8_t)(0 - sum);
 }
 
+/*
+ * Read a byte from the SMC DDC register file.
+ *
+ * Purpose: keep DDC access logic local so the FIFO command handler can remain
+ * simple.
+ */
 static uint8_t xenon_smc_ddc_read_reg(XenonSmcState *smc, uint8_t reg)
 {
     return smc->ddc_regs[reg];
 }
 
+/*
+ * Write a byte to the SMC DDC register file and execute simple commands.
+ *
+ * Purpose: support the DDC "read EDID byte" command pattern used by early
+ * bring-up code.
+ */
 static void xenon_smc_ddc_write_reg(XenonSmcState *smc, uint8_t reg, uint8_t value)
 {
     smc->ddc_regs[reg] = value;
@@ -153,6 +182,12 @@ static void xenon_smc_ddc_write_reg(XenonSmcState *smc, uint8_t reg, uint8_t val
     }
 }
 
+/*
+ * Process a completed FIFO request into a FIFO response.
+ *
+ * Purpose: implement the subset of SMC commands that secure boot / XeLL use
+ * (power-on reason, AV pack, I2C/DDC, version, etc.).
+ */
 static void xenon_smc_process_fifo(XenonSmcState *smc)
 {
     uint8_t req[sizeof(smc->fifo)];
@@ -290,6 +325,11 @@ static void xenon_smc_process_fifo(XenonSmcState *smc)
     }
 }
 
+/*
+ * Map a GPIO register offset to a compact index in the SMC state.
+ *
+ * Purpose: simplify GPIO register handling in read/write paths.
+ */
 static int xenon_smc_gpio_index(uint32_t reg)
 {
     switch (reg) {
@@ -316,6 +356,12 @@ static int xenon_smc_gpio_index(uint32_t reg)
     }
 }
 
+/*
+ * Reset/initialize the SMC state to power-on defaults.
+ *
+ * Purpose: seed the minimal SMC model with the configured power reason, AV pack
+ * type, console revision, UART backend selection, and baseline peripheral state.
+ */
 void xenon_smc_reset(XenonSmcState *smc, uint8_t power_on_reason,
                      uint8_t avpack_type, uint8_t console_revision,
                      const char *uart_backend, bool trace_boot)
@@ -354,6 +400,12 @@ void xenon_smc_reset(XenonSmcState *smc, uint8_t power_on_reason,
     xenon_hana_reset(smc->hana_regs, console_revision);
 }
 
+/*
+ * Guest-visible SMC register read helper.
+ *
+ * Purpose: implement the SMC MMIO read semantics used by CB/CD and XeLL, backed
+ * by the XenonSmcState fields and FIFO/DDC helpers.
+ */
 uint64_t xenon_smc_read(XenonSmcState *smc, uint64_t offset, unsigned size)
 {
     uint8_t tmp[8] = { 0 };
@@ -442,6 +494,12 @@ uint64_t xenon_smc_read(XenonSmcState *smc, uint64_t offset, unsigned size)
     return xenon_smc_copy_le_in(tmp, size);
 }
 
+/*
+ * Guest-visible SMC register write helper.
+ *
+ * Purpose: implement MMIO writes into the SMC model, including UART output and
+ * FIFO command submission that drives SMC responses.
+ */
 void xenon_smc_write(XenonSmcState *smc, uint64_t offset, uint64_t data, unsigned size)
 {
     uint8_t tmp[8] = { 0 };

@@ -43,6 +43,13 @@ static const XenonVectorMap xenon_vector_map[] = {
     { POWERPC_EXCP_THERM,    0x1800, "Thermal" },
 };
 
+/*
+ * Install Xenon-specific exception vector mapping into a CPU instance.
+ *
+ * Purpose: align QEMU's exception vectors/IVPR behavior with xenon-emu (and
+ * observed Xenon firmware expectations), avoiding reliance on generic PPC
+ * defaults that may not match Xenon.
+ */
 void xenon_install_exception_profile(XenonMachineState *xms, CPUPPCState *env)
 {
     uint32_t old_tb_flags = env->tb_env ? env->tb_env->flags : 0;
@@ -50,6 +57,11 @@ void xenon_install_exception_profile(XenonMachineState *xms, CPUPPCState *env)
     for (size_t i = 0; i < ARRAY_SIZE(xenon_vector_map); i++) {
         env->excp_vectors[xenon_vector_map[i].excp] = xenon_vector_map[i].vector;
     }
+    /*
+     * Xenon firmware/XeLL handlers run from the HRMOR mirror region
+     * (0x800000001c000000 + vector).
+     */
+    env->spr[SPR_PPE42_IVPR] = XENON_EXC_ALIAS_BASE;
     env->hreset_vector = 0x0000000000000100ULL;
 
     if (env->tb_env) {
@@ -64,11 +76,20 @@ void xenon_install_exception_profile(XenonMachineState *xms, CPUPPCState *env)
 
     if (xms && xms->trace_boot) {
         info_report("xbox360: installed xenon exception profile "
-                    "(hreset=0x%04x tb_flags 0x%08x -> 0x%08x)",
-                    0x0100, old_tb_flags, env->tb_env ? env->tb_env->flags : 0);
+                    "(hreset=0x%04x ivpr=0x%016" PRIx64
+                    " tb_flags 0x%08x -> 0x%08x)",
+                    0x0100, env->spr[SPR_PPE42_IVPR],
+                    old_tb_flags, env->tb_env ? env->tb_env->flags : 0);
     }
 }
 
+/*
+ * Decode whether a program counter value corresponds to a Xenon exception
+ * vector entry point (direct vector or HRMOR alias mirror).
+ *
+ * Purpose: make trace/debug output more readable by attributing PCs to named
+ * exception vectors during bring-up.
+ */
 bool xenon_decode_exception_vector_pc(uint64_t pc, uint64_t *vector, bool *is_alias)
 {
     for (size_t i = 0; i < ARRAY_SIZE(xenon_vector_map); i++) {
@@ -86,6 +107,11 @@ bool xenon_decode_exception_vector_pc(uint64_t pc, uint64_t *vector, bool *is_al
     return false;
 }
 
+/*
+ * Convert an exception vector number to a human-friendly name.
+ *
+ * Purpose: stable labeling for logs (especially around ISI/DSI/DSEG/ISEG).
+ */
 const char *xenon_exception_vector_name(uint64_t vector)
 {
     for (size_t i = 0; i < ARRAY_SIZE(xenon_vector_map); i++) {

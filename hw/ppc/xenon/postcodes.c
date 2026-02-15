@@ -173,6 +173,12 @@ static const XenonPostCodeDesc xenon_post_descs[] = {
     { 0xF3, "CB_A PANIC ENTRY_SIZE_INVALID_CB_B" },
 };
 
+/*
+ * Decode the high byte of the POST register into a mnemonic string.
+ *
+ * Purpose: provide stable, human-readable labels for the secure boot timeline
+ * (1BL/CB/CD/HV), matching xenon-emu's general naming.
+ */
 const char *xenon_decode_post_code(uint8_t post)
 {
     for (size_t i = 0; i < ARRAY_SIZE(xenon_post_descs); i++) {

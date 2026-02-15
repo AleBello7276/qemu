@@ -6,9 +6,16 @@
 
 #include "qemu/osdep.h"
 #include "qemu/error-report.h"
+#include "exec/cpu-common.h"
 #include "hw/ppc/xenon/xenon-internal.h"
 #include "hw/ppc/xenon/xgpu.h"
 
+/*
+ * NAND MMIO read handler.
+ *
+ * Purpose: expose the pre-built "logical NAND view" to the guest as a simple
+ * window during early bring-up, with bounded reads and optional trace.
+ */
 static uint64_t xenon_nand_read(void *opaque, hwaddr offset, unsigned size)
 {
     XenonMachineState *xms = opaque;
@@ -44,6 +51,12 @@ static uint64_t xenon_nand_read(void *opaque, hwaddr offset, unsigned size)
     return v;
 }
 
+/*
+ * NAND MMIO write handler.
+ *
+ * Purpose: capture guest writes to the NAND window and keep trace-boot
+ * visibility. Some firmware uses this region as scratch/status.
+ */
 static void xenon_nand_write(void *opaque, hwaddr offset, uint64_t data, unsigned size)
 {
     XenonMachineState *xms = opaque;
@@ -95,6 +108,12 @@ const MemoryRegionOps xenon_nand_ops = {
     },
 };
 
+/*
+ * Northbridge/SoC MMIO read handler (training/status scratch area).
+ *
+ * Purpose: provide a minimal NB register window sufficient for secure boot
+ * progress, including modeled status bits used by memory training code.
+ */
 static uint64_t xenon_nb_mmio_read(void *opaque, hwaddr offset, unsigned size)
 {
     XenonMachineState *xms = opaque;
@@ -142,6 +161,12 @@ static uint64_t xenon_nb_mmio_read(void *opaque, hwaddr offset, unsigned size)
     return v;
 }
 
+/*
+ * Northbridge/SoC MMIO write handler.
+ *
+ * Purpose: store guest-programmed NB state and recognize key writes that
+ * indicate training completion.
+ */
 static void xenon_nb_mmio_write(void *opaque, hwaddr offset, uint64_t data, unsigned size)
 {
     XenonMachineState *xms = opaque;
@@ -209,6 +234,12 @@ const MemoryRegionOps xenon_nb_mmio_ops = {
     },
 };
 
+/*
+ * SMC MMIO read handler.
+ *
+ * Purpose: route reads from the SMC register window through the SMC state
+ * machine and optionally log interesting status transitions during bring-up.
+ */
 static uint64_t xenon_smc_mmio_read(void *opaque, hwaddr offset, unsigned size)
 {
     XenonMachineState *xms = opaque;
@@ -250,6 +281,12 @@ static uint64_t xenon_smc_mmio_read(void *opaque, hwaddr offset, unsigned size)
     return v;
 }
 
+/*
+ * SMC MMIO write handler.
+ *
+ * Purpose: deliver guest writes into the SMC model and keep trace-boot logs
+ * readable by rate-limiting.
+ */
 static void xenon_smc_mmio_write(void *opaque, hwaddr offset, uint64_t data, unsigned size)
 {
     XenonMachineState *xms = opaque;
@@ -300,18 +337,90 @@ const MemoryRegionOps xenon_smc_ops = {
 #define XENON_SFCX_CMD_REG_TO_PAGE_BUF 0x01
 #define XENON_SFCX_CMD_LOG_PAGE_TO_BUF 0x02
 #define XENON_SFCX_CMD_PHY_PAGE_TO_BUF 0x03
+#define XENON_SFCX_CMD_DMA_LOG_TO_RAM  0x06
+#define XENON_SFCX_CMD_DMA_PHY_TO_RAM  0x07
 #define XENON_SFCX_CMD_NO_CMD          0xFF
 
+#define XENON_SFCX_CFG_DMA_LEN_MASK    0x000003C0U
+#define XENON_SFCX_SPARE_SIZE          (XENON_NAND_RAW_PAGE - XENON_NAND_LOGICAL_PAGE)
+
+static inline uint32_t xenon_sfcx_pci_get32(XenonMachineState *xms, hwaddr off);
+static inline void xenon_sfcx_pci_put32(XenonMachineState *xms, hwaddr off, uint32_t v);
+
+/*
+ * Perform an SFCX DMA transfer from NAND into guest RAM.
+ *
+ * Purpose: emulate the DMA mode used by CB/CD to fetch pages through the flash
+ * controller (logical vs physical page selection via the `physical` flag).
+ */
+static void xenon_sfcx_dma_from_nand(XenonMachineState *xms, bool physical)
+{
+    uint32_t addr = xenon_sfcx_pci_get32(xms, XENON_SFCX_REG_ADDRESS);
+    uint32_t config = xenon_sfcx_pci_get32(xms, XENON_SFCX_REG_CONFIG);
+    uint32_t data_pa = xenon_sfcx_pci_get32(xms, XENON_SFCX_REG_DATAPHYS);
+    uint32_t spare_pa = xenon_sfcx_pci_get32(xms, XENON_SFCX_REG_SPAREPHYS);
+    uint32_t pages = ((config & XENON_SFCX_CFG_DMA_LEN_MASK) >> 6) + 1U;
+
+    for (uint32_t page = 0; page < pages; page++) {
+        uint8_t raw_page[XENON_NAND_RAW_PAGE];
+        size_t copy = 0;
+        hwaddr raw_off;
+
+        /*
+         * Match xenon-emu: address register is logical-byte based and then
+         * expanded into raw 0x210-byte pages (data + spare).
+         */
+        raw_off = ((hwaddr)(addr / XENON_NAND_LOGICAL_PAGE) * XENON_NAND_RAW_PAGE) +
+                  (addr % XENON_NAND_LOGICAL_PAGE);
+        memset(raw_page, 0xFF, sizeof(raw_page));
+        if (raw_off < xms->nand_raw_size) {
+            copy = MIN((size_t)XENON_NAND_RAW_PAGE, xms->nand_raw_size - raw_off);
+            memcpy(raw_page, xms->nand_raw_data + raw_off, copy);
+        }
+
+        cpu_physical_memory_write((hwaddr)data_pa, raw_page, XENON_NAND_LOGICAL_PAGE);
+        if (physical) {
+            cpu_physical_memory_write((hwaddr)spare_pa,
+                                      raw_page + XENON_NAND_LOGICAL_PAGE,
+                                      XENON_SFCX_SPARE_SIZE);
+            spare_pa += XENON_SFCX_SPARE_SIZE;
+        }
+
+        addr += XENON_NAND_LOGICAL_PAGE;
+        data_pa += XENON_NAND_LOGICAL_PAGE;
+    }
+
+    xenon_sfcx_pci_put32(xms, XENON_SFCX_REG_ADDRESS, addr);
+}
+
+/*
+ * Read a 32-bit little-endian value from the SFCX PCI config shadow.
+ *
+ * Purpose: SFCX registers are modeled as PCI config fields (xenon-emu style);
+ * this helper centralizes byte->u32 conversion.
+ */
 static inline uint32_t xenon_sfcx_pci_get32(XenonMachineState *xms, hwaddr off)
 {
     return ldl_le_p(xms->pci_cfg_data + 0x8000 + off);
 }
 
+/*
+ * Write a 32-bit little-endian value to the SFCX PCI config shadow.
+ *
+ * Purpose: centralize byte ordering and offset calculation for SFCX register
+ * updates stored in the PCI config shadow.
+ */
 static inline void xenon_sfcx_pci_put32(XenonMachineState *xms, hwaddr off, uint32_t v)
 {
     stl_le_p(xms->pci_cfg_data + 0x8000 + off, v);
 }
 
+/*
+ * Load the internal SFCX page buffer from NAND.
+ *
+ * Purpose: implement the "page to buffer" commands (logical or physical),
+ * backing later DATA register accesses.
+ */
 static void xenon_sfcx_load_pagebuf(XenonMachineState *xms, uint32_t addr, bool physical)
 {
     memset(xms->sfcx_page_buf, 0xFF, sizeof(xms->sfcx_page_buf));
@@ -334,6 +443,12 @@ static void xenon_sfcx_load_pagebuf(XenonMachineState *xms, uint32_t addr, bool 
     }
 }
 
+/*
+ * SFCX MMIO read handler.
+ *
+ * Purpose: expose key SFCX registers (config/status/cmd/addr/data) through the
+ * low MMIO alias window used during CD/XeLL stages.
+ */
 static uint64_t xenon_sfcx_read(void *opaque, hwaddr offset, unsigned size)
 {
     XenonMachineState *xms = opaque;
@@ -395,6 +510,12 @@ static uint64_t xenon_sfcx_read(void *opaque, hwaddr offset, unsigned size)
     return v;
 }
 
+/*
+ * SFCX MMIO write handler.
+ *
+ * Purpose: accept flash controller commands and update register state, page
+ * buffer, and DMA behavior as needed by early boot loaders.
+ */
 static void xenon_sfcx_write(void *opaque, hwaddr offset, uint64_t data, unsigned size)
 {
     XenonMachineState *xms = opaque;
@@ -471,6 +592,16 @@ static void xenon_sfcx_write(void *opaque, hwaddr offset, uint64_t data, unsigne
             xenon_sfcx_pci_put32(xms, XENON_SFCX_REG_COMMAND, XENON_SFCX_CMD_NO_CMD);
             xenon_sfcx_pci_put32(xms, XENON_SFCX_REG_STATUS, 0x00000600U);
             break;
+        case XENON_SFCX_CMD_DMA_LOG_TO_RAM:
+            xenon_sfcx_dma_from_nand(xms, false);
+            xenon_sfcx_pci_put32(xms, XENON_SFCX_REG_COMMAND, XENON_SFCX_CMD_NO_CMD);
+            xenon_sfcx_pci_put32(xms, XENON_SFCX_REG_STATUS, 0x00000600U);
+            break;
+        case XENON_SFCX_CMD_DMA_PHY_TO_RAM:
+            xenon_sfcx_dma_from_nand(xms, true);
+            xenon_sfcx_pci_put32(xms, XENON_SFCX_REG_COMMAND, XENON_SFCX_CMD_NO_CMD);
+            xenon_sfcx_pci_put32(xms, XENON_SFCX_REG_STATUS, 0x00000600U);
+            break;
         default:
             xenon_sfcx_pci_put32(xms, XENON_SFCX_REG_COMMAND, val32);
             xenon_sfcx_pci_put32(xms, XENON_SFCX_REG_STATUS, 0x00000600U);
@@ -515,6 +646,12 @@ const MemoryRegionOps xenon_sfcx_ops = {
     },
 };
 
+/*
+ * PCI config MMIO read handler for Xenon low-MMIO alias window.
+ *
+ * Purpose: expose the PCI config shadow as a MMIO range during early stages
+ * (used for XGPU/SFCX config interactions).
+ */
 static uint64_t xenon_pci_cfg_read(void *opaque, hwaddr offset, unsigned size)
 {
     XenonMachineState *xms = opaque;
@@ -566,6 +703,12 @@ static uint64_t xenon_pci_cfg_read(void *opaque, hwaddr offset, unsigned size)
     return v;
 }
 
+/*
+ * PCI config MMIO write handler for Xenon low-MMIO alias window.
+ *
+ * Purpose: accept guest configuration writes and preserve strap-derived fields
+ * that behave read-only on real hardware.
+ */
 static void xenon_pci_cfg_write(void *opaque, hwaddr offset, uint64_t data, unsigned size)
 {
     XenonMachineState *xms = opaque;
@@ -645,6 +788,12 @@ const MemoryRegionOps xenon_pci_cfg_ops = {
     },
 };
 
+/*
+ * XGPU BAR0 MMIO read handler.
+ *
+ * Purpose: route aligned 32-bit accesses through the XGPU register model while
+ * providing a byte-backed shadow for other widths.
+ */
 static uint64_t xenon_xgpu_bar0_read(void *opaque, hwaddr offset, unsigned size)
 {
     XenonMachineState *xms = opaque;
@@ -692,6 +841,12 @@ static uint64_t xenon_xgpu_bar0_read(void *opaque, hwaddr offset, unsigned size)
     return v;
 }
 
+/*
+ * XGPU BAR0 MMIO write handler.
+ *
+ * Purpose: route aligned 32-bit writes into the XGPU model; store other writes
+ * into the shadow buffer for deterministic readback during bring-up.
+ */
 static void xenon_xgpu_bar0_write(void *opaque, hwaddr offset, uint64_t data, unsigned size)
 {
     XenonMachineState *xms = opaque;
