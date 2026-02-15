@@ -13,7 +13,9 @@
 #include "disas/disas-internal.h"
 #include "hw/core/cpu.h"
 #include "hw/ppc/xenon/debug.h"
+#include "hw/ppc/xenon/machine-priv.h"
 #include "hw/ppc/xenon/xenon-internal.h"
+#include "system/address-spaces.h"
 
 static const struct {
     uint32_t mask;
@@ -34,6 +36,7 @@ static const struct {
     { XENON_LOG_MODULE_TRACE,   "trace" },
 };
 
+
 static const char *xenon_log_module_name(uint32_t module)
 {
     if (module == XENON_LOG_MODULE_NONE) {
@@ -45,6 +48,23 @@ static const char *xenon_log_module_name(uint32_t module)
         }
     }
     return "unknown";
+}
+
+static int xenon_debug_read_memory(bfd_vma memaddr, bfd_byte *myaddr, int length,
+                                   struct disassemble_info *info)
+{
+    CPUDebug *s = container_of(info, CPUDebug, info);
+    int rc = cpu_memory_rw_debug(s->cpu, memaddr, myaddr, length, 0);
+
+    if (rc == 0) {
+        return 0;
+    }
+
+    hwaddr pa = xenon_seceng_translate(memaddr);
+    MemTxResult res = address_space_read(&address_space_memory, pa,
+                                         MEMTXATTRS_UNSPECIFIED,
+                                         myaddr, length);
+    return res == MEMTX_OK ? 0 : EIO;
 }
 
 char *xenon_log_modules_to_string(uint32_t mask)
@@ -274,12 +294,16 @@ void xenon_log_dump_disasm(XenonMachineState *xms, CPUPPCState *env,
 
     CPUDebug debug;
     g_autoptr(GString) ds = g_string_new("");
-    disas_initialize_debug_target(&debug, CPU(env));
+    disas_initialize_debug_target(&debug, env_cpu(env));
     debug.info.fprintf_func = disas_gstring_printf;
     debug.info.stream = (FILE *)ds;
+    debug.info.read_memory_func = xenon_debug_read_memory;
     debug.info.buffer_vma = start_pc;
-    debug.info.buffer_length = 0;
+    debug.info.buffer_length = 4;
     debug.info.show_opcodes = true;
+    if (!debug.info.print_insn) {
+        debug.info.print_insn = print_insn_od_target;
+    }
 
     uint64_t pc = start_pc;
     for (unsigned i = 0; i < count; i++) {

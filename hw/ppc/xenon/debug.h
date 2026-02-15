@@ -43,6 +43,7 @@ typedef struct XenonPcWatchpoint {
     uint64_t ea;
     char *label;
     bool triggered;
+    bool pending_dump;
 } XenonPcWatchpoint;
 
 char *xenon_log_modules_to_string(uint32_t mask);

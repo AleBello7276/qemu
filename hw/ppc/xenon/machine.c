@@ -44,6 +44,7 @@ static void xenon_clear_watchpoints(XenonMachineState *xms)
         g_free(xms->pc_watchpoints[i].label);
         xms->pc_watchpoints[i].label = NULL;
         xms->pc_watchpoints[i].triggered = false;
+        xms->pc_watchpoints[i].pending_dump = false;
         xms->pc_watchpoints[i].ea = 0;
     }
     xms->pc_watchpoint_count = 0;
@@ -66,6 +67,7 @@ static void xenon_apply_watchpoints(XenonMachineState *xms,
         xms->pc_watchpoints[inserted].label =
             entry->label ? g_strdup(entry->label) : NULL;
         xms->pc_watchpoints[inserted].triggered = false;
+        xms->pc_watchpoints[inserted].pending_dump = false;
         inserted++;
     }
     xms->pc_watchpoint_count = inserted;

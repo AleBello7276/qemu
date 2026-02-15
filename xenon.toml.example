@@ -29,8 +29,8 @@ CdShaBypass = true
 ConsoleRevision = "trinity"
 
 [Log]
-# Log Level: off | error | warn | info | debug | trace
-Level = "info"
+# Log Level: off | error | warn | info | debug | trace (use debug/trace for stall dumps)
+Level = "trace"
 # Log Modules: comma-separated list or "all"/"none"
 # Modules: post, pc, nand, soc, seceng, smc, sata, xgpu, patch, boot, machine, iic, trace
 Modules = "all"

@@ -358,10 +358,12 @@ bool xenon_toml_config_load(const char *path, XenonTomlConfig *cfg, Error **errp
             cfg->console_revision = v;
             cfg->have_console_revision = true;
         } else if ((sec == SEC_BOOT || sec == SEC_LOG || sec == SEC_NONE) &&
-                   !g_ascii_strcasecmp(key, "LogLevel")) {
+                   (!g_ascii_strcasecmp(key, "LogLevel") ||
+                    !g_ascii_strcasecmp(key, "Level"))) {
             xenon_set_str(&cfg->log_level, val);
         } else if ((sec == SEC_BOOT || sec == SEC_LOG || sec == SEC_NONE) &&
-                   !g_ascii_strcasecmp(key, "LogModules")) {
+                   (!g_ascii_strcasecmp(key, "LogModules") ||
+                    !g_ascii_strcasecmp(key, "Modules"))) {
             xenon_set_str(&cfg->log_modules, val);
         } else if ((sec == SEC_BOOT || sec == SEC_LOG || sec == SEC_NONE) &&
                    !g_ascii_strcasecmp(key, "StallThreshold")) {

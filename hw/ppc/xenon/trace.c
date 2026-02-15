@@ -414,14 +414,18 @@ void xenon_pc_log_tick(void *opaque)
     pc = env->nip;
     for (unsigned i = 0; i < xms->pc_watchpoint_count; i++) {
         XenonPcWatchpoint *watch = &xms->pc_watchpoints[i];
-        if (watch->triggered) {
+        if (watch->pending_dump) {
+            watch->pending_dump = false;
+            xenon_log_dump_disasm(xms, env, watch->ea, xms->disasm_count,
+                                  watch->label ? watch->label : "watchpoint",
+                                  XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_PC);
             continue;
         }
-        if (watch->ea == pc) {
+        if (!watch->triggered && watch->ea == pc) {
+            PC_INFO("watchpoint hit pc=0x%016" PRIx64 " label=%s",
+                    pc, watch->label ? watch->label : "(none)");
             watch->triggered = true;
-            xenon_log_dump_disasm(xms, env, pc, xms->disasm_count,
-                                  watch->label ? watch->label : "watchpoint",
-                                  XENON_LOG_LEVEL_DEBUG, XENON_LOG_MODULE_PC);
+            watch->pending_dump = true;
         }
     }
     rc4_hot_loop = (pc >= 0x0000000004001e5cULL &&
