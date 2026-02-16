@@ -8,6 +8,9 @@
 #include "qemu/error-report.h"
 #include "hw/ppc/ppc.h"
 #include "hw/ppc/xenon/iic.h"
+#include "hw/ppc/xenon/debug.h"
+
+#define IIC_INFO(...) XENON_LOG_INFO(xms, XENON_LOG_MODULE_IIC, __VA_ARGS__)
 
 #define XENON_IIC_THREAD_BLOCK_SIZE   0x1000U
 #define XENON_IIC_THREAD_BLOCKS_END   (XENON_MAX_CPUS * XENON_IIC_THREAD_BLOCK_SIZE)
@@ -161,8 +164,8 @@ static void xenon_iic_wake_thread_one(XenonMachineState *xms, unsigned thread_id
     qemu_cpu_kick(cs);
     xms->cpu_online_mask |= (uint8_t)(1u << thread_id);
 
-    if (xms->trace_boot) {
-        info_report("xbox360: iic wake thread=%u source=%s online-mask=0x%02x",
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_IIC)) {
+        IIC_INFO("iic wake thread=%u source=%s online-mask=0x%02x",
                     thread_id, source, xms->cpu_online_mask);
     }
 }
@@ -221,8 +224,8 @@ static void xenon_iic_generate_interrupt(XenonMachineState *xms,
         xenon_iic_wake_thread_one(xms, 1, "ipi-boot-sibling");
     }
 
-    if (xms->trace_boot) {
-        info_report("xbox360: iic ipi vector=0x%02x mask=0x%02x",
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_IIC)) {
+        IIC_INFO("iic ipi vector=0x%02x mask=0x%02x",
                     interrupt_type, cpus_mask);
     }
 }

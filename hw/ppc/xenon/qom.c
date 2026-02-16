@@ -339,8 +339,15 @@ static bool xenon_machine_get_trace_boot(Object *obj, Error **errp)
 static void xenon_machine_set_trace_boot(Object *obj, bool value, Error **errp)
 {
     XenonMachineState *xms = XENON_MACHINE(obj);
+    /*
+     * Deprecated: trace-boot property now sets log_level to trace.
+     * The trace_boot field itself is kept for backwards compatibility.
+     */
     xms->trace_boot = value;
     xms->user_set_trace_boot = true;
+    if (value && xms->log_level < XENON_LOG_LEVEL_TRACE) {
+        xms->log_level = XENON_LOG_LEVEL_TRACE;
+    }
 }
 
 /*

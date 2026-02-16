@@ -155,7 +155,7 @@ void xenon_trace_on_post_observed(XenonMachineState *xms, uint64_t post_raw,
                                   uint8_t post, const char *desc, uint64_t ea,
                                   CPUPPCState *env)
 {
-    if (xms->trace_boot && post == 0xF2 && env) {
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_POST) && post == 0xF2 && env) {
         POST_INFO("F2 context NIP=0x%016" PRIx64
                   " SRR0=0x%016" PRIx64 " LR=0x%016" PRIx64
                   " CTR=0x%016" PRIx64,
@@ -166,7 +166,7 @@ void xenon_trace_on_post_observed(XenonMachineState *xms, uint64_t post_raw,
         warn_report("xbox360: CB_A SHA verify failed (POST=0xF2). "
                     "For XeLL/RGH images, enable -M xbox360,rgh2-patches=on.");
     }
-    if (xms->trace_boot && post == 0xAF && env) {
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_POST) && post == 0xAF && env) {
         uint32_t e104_be = ldl_be_p(xms->soc_e1_data + 0x00040000);
         uint32_t e104_le = ldl_le_p(xms->soc_e1_data + 0x00040000);
         uint32_t d8000_be = ldl_be_p(xms->pci_cfg_data + 0x00008000);
@@ -200,7 +200,7 @@ void xenon_trace_on_post_observed(XenonMachineState *xms, uint64_t post_raw,
                   d8008_be, d8008_le,
                   e15e0, e15e8, e15ec);
     }
-    if (xms->trace_boot && post == 0xAE && env) {
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_POST) && post == 0xAE && env) {
         POST_INFO("AE context NIP=0x%016" PRIx64
                   " SRR0=0x%016" PRIx64 " SRR1=0x%016" PRIx64
                   " DAR=0x%016" PRIx64 " DSISR=0x%016" PRIx64
@@ -209,7 +209,7 @@ void xenon_trace_on_post_observed(XenonMachineState *xms, uint64_t post_raw,
                   env->spr[SPR_DAR], env->spr[SPR_DSISR],
                   env->spr[SPR_HSRR0], env->spr[SPR_HSRR1]);
     }
-    if (xms->trace_boot && post == 0x84 && env) {
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_POST) && post == 0x84 && env) {
         POST_INFO("84 context NIP=0x%016" PRIx64
                   " SRR0=0x%016" PRIx64 " SRR1=0x%016" PRIx64
                   " LPCR=0x%016" PRIx64
@@ -222,7 +222,7 @@ void xenon_trace_on_post_observed(XenonMachineState *xms, uint64_t post_raw,
                   env->spr[SPR_XENON_PPE_TLB_VPN],
                   env->spr[SPR_XENON_PPE_TLB_RPN]);
     }
-    if (xms->trace_boot && post == 0x4B && env) {
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_POST) && post == 0x4B && env) {
         POST_INFO("4B context NIP=0x%016" PRIx64
                   " LR=0x%016" PRIx64 " CTR=0x%016" PRIx64
                   " r1=0x%016" PRIx64 " r2=0x%016" PRIx64
@@ -233,7 +233,7 @@ void xenon_trace_on_post_observed(XenonMachineState *xms, uint64_t post_raw,
                   env->gpr[1], env->gpr[2], env->gpr[3], env->gpr[4],
                   env->gpr[5], env->gpr[6], env->gpr[7], env->gpr[8]);
     }
-    if (xms->trace_boot && post == 0x83 && env) {
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_POST) && post == 0x83 && env) {
         uint8_t dar_bytes[16] = { 0 };
         int dar_rc = -1;
         CPUState *cs = env_cpu(env);
@@ -274,7 +274,7 @@ void xenon_trace_on_post_observed(XenonMachineState *xms, uint64_t post_raw,
 
     if (!xms->have_last_post_code || xms->last_post_code != post_raw) {
         xenon_post_log(xms, post_raw, desc, ea);
-        if (xms->trace_boot && post == 0x2E) {
+        if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_POST) && post == 0x2E) {
             xms->nand_trace_reads = 0;
             xms->nand_trace_writes = 0;
             xms->soc_trace_reads = 0;
@@ -290,7 +290,7 @@ void xenon_trace_on_post_observed(XenonMachineState *xms, uint64_t post_raw,
         }
         if (post == 0x40 && !xms->low_mmio_aliases_enabled) {
             xms->low_mmio_aliases_enabled = true;
-            if (xms->trace_boot) {
+            if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_TRACE)) {
                 uint32_t sfcx_cfg = ldl_le_p(xms->pci_cfg_data + 0x8000);
                 uint32_t sfcx_sts = ldl_le_p(xms->pci_cfg_data + 0x8004);
                 TRACE_INFO("enabled low MMIO aliases for CD/XeLL stage");
@@ -299,7 +299,7 @@ void xenon_trace_on_post_observed(XenonMachineState *xms, uint64_t post_raw,
                            sfcx_cfg, sfcx_sts);
             }
         }
-        if (xms->trace_boot && post == 0x40) {
+        if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_POST) && post == 0x40) {
             uint8_t cd_bootblk[0x20] = { 0 };
             bool cd_bootblk_empty = true;
             vaddr cd_ea = 0x0000000000280000ULL;
@@ -351,7 +351,7 @@ void xenon_trace_on_post_observed(XenonMachineState *xms, uint64_t post_raw,
         if (post == 0x2E && env) {
             xenon_dump_hwinit_bytecode(xms, env);
         }
-        if (xms->trace_boot && env) {
+        if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_TRACE) && env) {
             uint8_t srr0_bytes[16] = { 0 };
             uint8_t real_bytes[16] = { 0 };
             uint64_t srr0 = env->spr[SPR_SRR0];
@@ -607,7 +607,7 @@ void xenon_pc_log_tick(void *opaque)
                         env->lr, env->ctr);
             }
         }
-        if (pc == (XENON_EXC_ALIAS_BASE + 0x0478) && xms->trace_boot) {
+        if (pc == (XENON_EXC_ALIAS_BASE + 0x0478) && xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_TRACE)) {
             uint64_t base = env->gpr[2] - 0x7fc0ULL;
             uint8_t raw[6 * 4] = { 0 };
             uint32_t slot[6] = { 0 };
@@ -661,7 +661,7 @@ void xenon_pc_log_tick(void *opaque)
                    xms->hwinit_fetch_logs, insn, op, o1, o2, env->gpr[16]);
         xms->hwinit_fetch_logs++;
     }
-    if (pc == 0x30036e0 && xms->trace_boot) {
+    if (pc == 0x30036e0 && xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_TRACE)) {
         TRACE_INFO("hwinit-outfailure ip_ea=0x%016" PRIx64
                    " end_ea=0x%016" PRIx64 " insn=0x%08" PRIx64
                    " r5=0x%016" PRIx64 " r6=0x%016" PRIx64
@@ -669,7 +669,7 @@ void xenon_pc_log_tick(void *opaque)
                    env->gpr[16], env->gpr[4], env->gpr[17],
                    env->gpr[5], env->gpr[6], env->gpr[7]);
     }
-    if (pc == 0x800000001c000c70 && xms->trace_boot) {
+    if (pc == 0x800000001c000c70 && xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_TRACE)) {
         uint64_t base = env->gpr[2] - 0x7fc0ULL;
         uint8_t raw[6 * 4] = { 0 };
         uint32_t slot[6] = { 0 };

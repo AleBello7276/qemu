@@ -17,23 +17,47 @@
 #include "hw/ppc/xenon/xenon-internal.h"
 #include "system/address-spaces.h"
 
+#define ANSI_RESET   "\033[0m"
+#define ANSI_BOLD    "\033[1m"
+
+#define ANSI_RED     "\033[31m"
+#define ANSI_YELLOW  "\033[33m"
+#define ANSI_GREEN   "\033[32m"
+#define ANSI_CYAN    "\033[36m"
+#define ANSI_MAGENTA "\033[35m"
+#define ANSI_BLUE    "\033[34m"
+#define ANSI_GRAY    "\033[90m"
+
+static const char *xenon_log_level_color(XenonLogLevel level)
+{
+    switch (level) {
+    case XENON_LOG_LEVEL_ERROR: return ANSI_RED;
+    case XENON_LOG_LEVEL_WARN:  return ANSI_YELLOW;
+    case XENON_LOG_LEVEL_INFO: return ANSI_GREEN;
+    case XENON_LOG_LEVEL_DEBUG: return ANSI_CYAN;
+    case XENON_LOG_LEVEL_TRACE: return ANSI_GRAY;
+    default: return ANSI_RESET;
+    }
+}
+
 static const struct {
     uint32_t mask;
     const char *name;
+    const char *color;
 } xenon_log_modules[] = {
-    { XENON_LOG_MODULE_POST,    "post" },
-    { XENON_LOG_MODULE_PC,      "pc" },
-    { XENON_LOG_MODULE_NAND,    "nand" },
-    { XENON_LOG_MODULE_SOC,     "soc" },
-    { XENON_LOG_MODULE_SECENG,  "seceng" },
-    { XENON_LOG_MODULE_SMC,     "smc" },
-    { XENON_LOG_MODULE_SATA,    "sata" },
-    { XENON_LOG_MODULE_XGPU,    "xgpu" },
-    { XENON_LOG_MODULE_PATCH,   "patch" },
-    { XENON_LOG_MODULE_BOOT,    "boot" },
-    { XENON_LOG_MODULE_MACHINE, "machine" },
-    { XENON_LOG_MODULE_IIC,     "iic" },
-    { XENON_LOG_MODULE_TRACE,   "trace" },
+    { XENON_LOG_MODULE_POST,    "post",    ANSI_BLUE },
+    { XENON_LOG_MODULE_PC,      "pc",      ANSI_MAGENTA },
+    { XENON_LOG_MODULE_NAND,    "nand",    ANSI_CYAN },
+    { XENON_LOG_MODULE_SOC,     "soc",     ANSI_GREEN },
+    { XENON_LOG_MODULE_SECENG,  "seceng",  ANSI_YELLOW },
+    { XENON_LOG_MODULE_SMC,     "smc",     ANSI_RED },
+    { XENON_LOG_MODULE_SATA,    "sata",    ANSI_GRAY },
+    { XENON_LOG_MODULE_XGPU,    "xgpu",    ANSI_MAGENTA },
+    { XENON_LOG_MODULE_PATCH,   "patch",   ANSI_YELLOW },
+    { XENON_LOG_MODULE_BOOT,    "boot",    ANSI_GREEN },
+    { XENON_LOG_MODULE_MACHINE, "machine", ANSI_CYAN },
+    { XENON_LOG_MODULE_IIC,     "iic",     ANSI_GRAY },
+    { XENON_LOG_MODULE_TRACE,   "trace",   ANSI_BLUE },
 };
 
 
@@ -48,6 +72,19 @@ static const char *xenon_log_module_name(uint32_t module)
         }
     }
     return "unknown";
+}
+
+static const char *xenon_log_module_color(uint32_t module)
+{
+    if (module == XENON_LOG_MODULE_NONE) {
+        return ANSI_RESET;
+    }
+    for (size_t i = 0; i < ARRAY_SIZE(xenon_log_modules); i++) {
+        if (module == xenon_log_modules[i].mask) {
+            return xenon_log_modules[i].color;
+        }
+    }
+    return ANSI_RESET;
 }
 
 static int xenon_debug_read_memory(bfd_vma memaddr, bfd_byte *myaddr, int length,
@@ -235,6 +272,19 @@ bool xenon_log_enabled(const XenonMachineState *xms, XenonLogLevel level,
     return true;
 }
 
+bool xenon_log_enabled_raw(XenonLogLevel level, uint32_t module_mask,
+                          uint32_t module)
+{
+    if (level == XENON_LOG_LEVEL_OFF) {
+        return false;
+    }
+    if (module != XENON_LOG_MODULE_NONE &&
+        !(module_mask & module)) {
+        return false;
+    }
+    return true;
+}
+
 static void xenon_log_emit(const char *prefix, XenonLogLevel level,
                            const char *message)
 {
@@ -264,11 +314,16 @@ void xenon_log(const XenonMachineState *xms, XenonLogLevel level,
         return;
     }
 
-    g_autofree char *prefix = NULL;
-    char buf[128];
+    const char *lvl_color = xenon_log_level_color(level);
+    const char *mod_color = xenon_log_module_color(module);
     const char *lvl_name = xenon_log_level_name(level);
     const char *module_name = xenon_log_module_name(module);
-    g_snprintf(buf, sizeof(buf), "xbox360[%s][%s]:", lvl_name, module_name);
+
+    g_autofree char *prefix = NULL;
+    char buf[128];
+    g_snprintf(buf, sizeof(buf), "%sxbox360%s%s[%s%s%s%s]:%s ",
+               lvl_color, ANSI_RESET, mod_color, lvl_name, ANSI_RESET,
+               mod_color, module_name, ANSI_RESET);
     prefix = g_strdup(buf);
 
     g_autofree GString *msg = g_string_new(NULL);

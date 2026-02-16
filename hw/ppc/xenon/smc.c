@@ -9,6 +9,7 @@
 #include "qemu/error-report.h"
 #include "hw/ppc/xenon/hana.h"
 #include "hw/ppc/xenon/smc.h"
+#include "hw/ppc/xenon/debug.h"
 
 #define UART_BYTE_OUT_REG   0x10
 #define UART_BYTE_IN_REG    0x14
@@ -319,7 +320,8 @@ static void xenon_smc_process_fifo(XenonSmcState *smc)
         smc->smi_int_ack = 0;
     }
 
-    if (smc->trace_boot) {
+    if (xenon_log_enabled_raw(smc->log_level, smc->log_module_mask,
+                               XENON_LOG_MODULE_SMC)) {
         info_report("xbox360: smc fifo cmd=0x%02x -> rsp[0..3]=%02x %02x %02x %02x",
                     cmd, smc->fifo[0], smc->fifo[1], smc->fifo[2], smc->fifo[3]);
     }
@@ -364,13 +366,15 @@ static int xenon_smc_gpio_index(uint32_t reg)
  */
 void xenon_smc_reset(XenonSmcState *smc, uint8_t power_on_reason,
                      uint8_t avpack_type, uint8_t console_revision,
-                     const char *uart_backend, bool trace_boot)
+                     const char *uart_backend, XenonLogLevel log_level,
+                     uint32_t log_module_mask)
 {
     memset(smc, 0, sizeof(*smc));
     smc->power_on_reason = power_on_reason;
     smc->avpack_type = avpack_type;
     smc->console_revision = console_revision;
-    smc->trace_boot = trace_boot;
+    smc->log_level = log_level;
+    smc->log_module_mask = log_module_mask;
     smc->uart_stdio = false;
     if (!uart_backend || !g_ascii_strcasecmp(uart_backend, "null")) {
         smc->uart_stdio = false;

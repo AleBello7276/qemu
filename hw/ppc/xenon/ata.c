@@ -12,6 +12,7 @@
 #include "hw/ppc/xenon/debug.h"
 
 #define ATA_INFO(...) XENON_LOG_INFO(xms, XENON_LOG_MODULE_SATA, __VA_ARGS__)
+#define ATA_DEBUG(...) XENON_LOG_DEBUG(xms, XENON_LOG_MODULE_SATA, __VA_ARGS__)
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -761,11 +762,15 @@ static void xenon_ata_handle_command(XenonAtaPort *p, uint8_t cmd)
  * Purpose: model libxenon-style SATA DMA reads by copying from the staged
  * data_out buffer into guest RAM and updating DMA status bits.
  */
-static void xenon_ata_dma_exec(XenonAtaPort *p)
+static void xenon_ata_dma_exec(XenonMachineState *xms, XenonAtaPort *p)
 {
     uint32_t table = p->dma_table_raw & 0x7FFFFFFFU;
     bool read_operation = (p->dma_command & XENON_ATA_DMA_WR) != 0;
     uint32_t table_off = 0;
+
+    ATA_DEBUG("DMA exec START: table=0x%08x read_op=%d data_out_len=%zu",
+              table, read_operation,
+              p->data_out ? (size_t)p->data_out->len : 0);
 
     p->dma_status = XENON_ATA_DMA_ACTIVE;
 
@@ -785,16 +790,19 @@ static void xenon_ata_dma_exec(XenonAtaPort *p)
             size = 65536U;
         }
 
+        ATA_DEBUG("DMA PRD[%u]: phys=0x%08x size=%u last=%d",
+                  i, phys, size, last);
+
         if (read_operation) {
             size_t remain = 0;
             size_t copy = 0;
 
-            if (p->data_out_pos < p->data_out->len) {
+            if (p->data_out && p->data_out_pos < p->data_out->len) {
                 remain = p->data_out->len - p->data_out_pos;
                 copy = MIN((size_t)size, remain);
                 cpu_physical_memory_write((hwaddr)phys,
-                                          p->data_out->data + p->data_out_pos,
-                                          copy);
+                                         p->data_out->data + p->data_out_pos,
+                                         copy);
                 p->data_out_pos += copy;
             }
             if (copy < size) {
@@ -802,14 +810,18 @@ static void xenon_ata_dma_exec(XenonAtaPort *p)
                 cpu_physical_memory_write((hwaddr)phys + copy, zeros, size - copy);
             }
         } else {
+            if (!p->data_in) {
+                p->data_in = g_byte_array_new();
+            }
             g_byte_array_set_size(p->data_in, p->data_in->len + size);
             cpu_physical_memory_read((hwaddr)phys,
-                                     p->data_in->data + (p->data_in->len - size),
-                                     size);
+                                    p->data_in->data + (p->data_in->len - size),
+                                    size);
         }
 
         table_off += 8;
         if (last) {
+            ATA_DEBUG("DMA exec: last entry reached at PRD[%u]", i);
             break;
         }
     }
@@ -818,7 +830,10 @@ static void xenon_ata_dma_exec(XenonAtaPort *p)
     p->dma_status = XENON_ATA_DMA_INTR;
     p->status = xenon_ata_idle_status(p);
     p->data_out_pos = 0;
-    g_byte_array_set_size(p->data_out, 0);
+    if (p->data_out) {
+        g_byte_array_set_size(p->data_out, 0);
+    }
+    ATA_DEBUG("DMA exec DONE");
 }
 
 /*
@@ -1009,7 +1024,7 @@ static void xenon_ata_write8(XenonAtaPort *p, hwaddr reg, uint8_t val)
             xenon_ata_port_soft_reset(p);
         }
         if (val & XENON_ATA_DMA_ACTIVE) {
-            xenon_ata_dma_exec(p);
+            xenon_ata_dma_exec(xms, p);
         }
         break;
     }
@@ -1061,7 +1076,7 @@ static uint64_t xenon_sata_read(void *opaque, hwaddr offset, unsigned size)
         }
     }
 
-    if (xms->trace_boot && ata->trace_reads < XENON_ATA_TRACE_LIMIT) {
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_SATA) && ata->trace_reads < XENON_ATA_TRACE_LIMIT) {
         ATA_INFO("sata-read off=0x%03" PRIx64
                  " size=%u val=0x%016" PRIx64,
                  (uint64_t)offset, size, xenon_ata_pack_be(tmp, size));
@@ -1092,7 +1107,7 @@ static void xenon_sata_write(void *opaque, hwaddr offset, uint64_t data, unsigne
     p = xenon_ata_port_from_offset(ata, offset, &reg);
     xenon_ata_unpack_be(tmp, size, data);
 
-    if (xms->trace_boot && ata->trace_writes < XENON_ATA_TRACE_LIMIT) {
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_SATA) && ata->trace_writes < XENON_ATA_TRACE_LIMIT) {
         ATA_INFO("sata-write off=0x%03" PRIx64
                  " size=%u val=0x%016" PRIx64,
                  (uint64_t)offset, size, data);

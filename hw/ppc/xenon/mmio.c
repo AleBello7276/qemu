@@ -49,7 +49,7 @@ static uint64_t xenon_nand_read(void *opaque, hwaddr offset, unsigned size)
     default: break;
     }
 
-    if (xms->trace_boot && xms->nand_trace_reads < 32) {
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_NAND) && xms->nand_trace_reads < 32) {
         NAND_INFO("nand-mmio-read off=0x%08" PRIx64
                   " size=%u val=0x%016" PRIx64,
                   (uint64_t)offset, size, v);
@@ -69,7 +69,7 @@ static void xenon_nand_write(void *opaque, hwaddr offset, uint64_t data, unsigne
     XenonMachineState *xms = opaque;
     uint8_t buf[8];
 
-    if (xms->trace_boot && xms->nand_trace_writes < 16) {
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_NAND) && xms->nand_trace_writes < 16) {
         NAND_INFO("nand-mmio-write off=0x%08" PRIx64
                   " size=%u val=0x%016" PRIx64,
                   (uint64_t)offset, size, data);
@@ -156,7 +156,7 @@ static uint64_t xenon_nb_mmio_read(void *opaque, hwaddr offset, unsigned size)
     default: break;
     }
 
-    if (xms->trace_boot &&
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_SOC) &&
         (offset == 0x15e0 || offset == 0x15e4 ||
          offset == 0x15e8 || offset == 0x15ec) &&
         xms->soc_trace_reads < 256) {
@@ -214,7 +214,7 @@ static void xenon_nb_mmio_write(void *opaque, hwaddr offset, uint64_t data, unsi
         stl_be_p(xms->nb_mmio_data + 0x15ec, sts);
     }
 
-    if (xms->trace_boot &&
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_SOC) &&
         (offset == 0x15e0 || offset == 0x15e4 ||
          offset == 0x15e8 || offset == 0x15ec) &&
         xms->soc_trace_writes < 256) {
@@ -253,7 +253,7 @@ static uint64_t xenon_smc_mmio_read(void *opaque, hwaddr offset, unsigned size)
     uint64_t v = xenon_smc_read(&xms->smc_state, offset, size);
     bool should_log = false;
 
-    if (xms->trace_boot && offset <= 0x94 &&
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_SMC) && offset <= 0x94 &&
         xms->smc_trace_reads < XENON_SMC_TRACE_LIMIT) {
         if (offset == 0x18) {
             uint32_t cur = (uint32_t)v;
@@ -303,7 +303,7 @@ static void xenon_smc_mmio_write(void *opaque, hwaddr offset, uint64_t data, uns
         return;
     }
 
-    if (xms->trace_boot && offset <= 0x94 &&
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_SMC) && offset <= 0x94 &&
         xms->smc_trace_writes < XENON_SMC_TRACE_LIMIT) {
         SMC_INFO("smc-write off=0x%03" PRIx64
                  " size=%u val=0x%016" PRIx64,
@@ -506,7 +506,7 @@ static uint64_t xenon_sfcx_read(void *opaque, hwaddr offset, unsigned size)
         break;
     }
 
-    if (xms->trace_boot && reg <= XENON_SFCX_REG_PHISON &&
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_SATA) && reg <= XENON_SFCX_REG_PHISON &&
         xms->sfcx_trace_reads < 128) {
         SATA_INFO("sfcx-read off=0x%03" PRIx32
                   " size=%u val=0x%016" PRIx64,
@@ -628,7 +628,7 @@ static void xenon_sfcx_write(void *opaque, hwaddr offset, uint64_t data, unsigne
         break;
     }
 
-    if (xms->trace_boot && reg <= XENON_SFCX_REG_PHISON &&
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_SATA) && reg <= XENON_SFCX_REG_PHISON &&
         xms->sfcx_trace_writes < 128) {
         SATA_INFO("sfcx-write off=0x%03" PRIx32
                   " size=%u val=0x%016" PRIx64,
@@ -698,7 +698,7 @@ static uint64_t xenon_pci_cfg_read(void *opaque, hwaddr offset, unsigned size)
         break;
     }
 
-    if (xms->trace_boot &&
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_XGPU) &&
         offset >= 0x10000 && offset < 0x10100 &&
         xms->xgpu_trace_reads < 32) {
         XGPU_INFO("xgpu-cfg-read off=0x%05" PRIx64
@@ -769,7 +769,7 @@ static void xenon_pci_cfg_write(void *opaque, hwaddr offset, uint64_t data, unsi
         stl_le_p(xms->pci_cfg_data + 0x8004, 0x00000600U);
     }
 
-    if (xms->trace_boot &&
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_XGPU) &&
         offset >= 0x10000 && offset < 0x10100 &&
         xms->xgpu_trace_writes < 32) {
         XGPU_INFO("xgpu-cfg-write off=0x%05" PRIx64

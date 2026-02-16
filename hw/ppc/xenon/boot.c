@@ -169,7 +169,7 @@ void xenon_init_soc_prv_defaults(XenonMachineState *xms)
                         MEMTXATTRS_UNSPECIFIED, (const uint8_t *)&pmc, sizeof(pmc));
     por_rb = ldq_be_p(xms->prv_mmio_data + por_off);
 
-    if (xms->trace_boot) {
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_BOOT)) {
         BOOT_INFO("initialized PRV defaults "
                   "POR=0x%016" PRIx64 " PMCTRL=0x%016" PRIx64
                   " readback.POR=0x%016" PRIx64,

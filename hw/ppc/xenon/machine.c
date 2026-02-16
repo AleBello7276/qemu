@@ -82,7 +82,11 @@ void xenon_log_update_pc_timer(XenonMachineState *xms)
     if (!xms) {
         return;
     }
-    bool need_timer = xms->trace_boot ||
+    /*
+     * Timer runs whenever logging is enabled (log_level > OFF) OR when
+     * watchpoints are configured. This replaces the old trace_boot option.
+     */
+    bool need_timer = (xms->log_level > XENON_LOG_LEVEL_OFF) ||
                       xms->pc_watchpoint_count > 0 ||
                       (xms->log_module_mask & XENON_LOG_MODULE_PC);
     if (!need_timer) {
@@ -157,7 +161,14 @@ static void xenon_apply_config_file(XenonMachineState *xms)
         xms->smc_avpack_type = (uint8_t)cfg.avpack_type;
     }
     if (cfg.have_trace_boot && !xms->user_set_trace_boot) {
+        /*
+         * Deprecated: trace_boot from config now sets log_level to trace.
+         * The trace_boot field itself is kept for backwards compatibility.
+         */
         xms->trace_boot = cfg.trace_boot;
+        if (cfg.trace_boot && xms->log_level < XENON_LOG_LEVEL_TRACE) {
+            xms->log_level = XENON_LOG_LEVEL_TRACE;
+        }
     }
     if (cfg.have_pretty_post && !xms->user_set_pretty_post) {
         xms->pretty_post = cfg.pretty_post;
@@ -304,7 +315,7 @@ void xenon_init(MachineState *machine)
     xenon_init_soc_prv_defaults(xms);
     xenon_smc_reset(&xms->smc_state, xms->smc_power_on_reason,
                     xms->smc_avpack_type, xms->console_revision,
-                    xms->smc_uart, xms->trace_boot);
+                    xms->smc_uart, xms->log_level, xms->log_module_mask);
     memory_region_init_io(&xms->smc, OBJECT(machine), &xenon_smc_ops, xms,
                           "xbox360.smc", XENON_SMC_SIZE);
     memory_region_add_subregion(get_system_memory(), XENON_SMC_BASE, &xms->smc);
@@ -368,7 +379,7 @@ void xenon_init(MachineState *machine)
                 memory_region_add_subregion_overlap(&w->mr, XENON_SECENG_ALIAS_BASE,
                                                     &w->fast_alias, 1);
                 w->fast_alias_enabled = true;
-                if (xms->trace_boot) {
+                if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_SECENG)) {
                     info_report("xbox360: seceng[%d] direct-alias enabled "
                                 "base=0x%016" PRIx64 " size=0x%016" PRIx64,
                                 i, (uint64_t)XENON_SECENG_ALIAS_BASE, alias_size);
@@ -561,7 +572,7 @@ void xenon_init(MachineState *machine)
     info_report("xbox360: console-revision=%s (%u)",
                 xenon_console_revision_name(xms->console_revision),
                 (unsigned)xms->console_revision);
-    if (xms->trace_boot) {
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_BOOT)) {
         info_report("xbox360: NAND logical view mapped (%u-byte pages from %u-byte raw pages)",
                     XENON_NAND_LOGICAL_PAGE, XENON_NAND_RAW_PAGE);
         info_report("xbox360: mapped SROM @ 0x%08" PRIx64 " (1BL+fuses), NAND @ 0x%08" PRIx64,

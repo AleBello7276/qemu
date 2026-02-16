@@ -54,6 +54,8 @@ void xenon_log_set_level(XenonMachineState *xms, XenonLogLevel level);
 void xenon_log_set_modules(XenonMachineState *xms, uint32_t mask);
 bool xenon_log_enabled(const XenonMachineState *xms, XenonLogLevel level,
                        uint32_t module);
+bool xenon_log_enabled_raw(XenonLogLevel level, uint32_t module_mask,
+                           uint32_t module);
 void xenon_log(const XenonMachineState *xms, XenonLogLevel level,
                uint32_t module, const char *fmt, ...) G_GNUC_PRINTF(4, 5);
 void xenon_log_dump_disasm(XenonMachineState *xms, CPUPPCState *env,

@@ -9,6 +9,7 @@
 #include "qemu/units.h"
 #include "hw/ppc/xenon/xenon-internal.h"
 #include "hw/ppc/xenon/xgpu.h"
+#include "hw/ppc/xenon/debug.h"
 #include "system/address-spaces.h"
 #include "ui/pixel_ops.h"
 
@@ -139,7 +140,7 @@ void xenon_dbg_update_display(void *opaque)
             }
         }
 
-        if (xms->trace_boot && xms->dbg_fb_enabled) {
+        if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_XGPU) && xms->dbg_fb_enabled) {
             info_report("xbox360: xgpu scanout disabled");
         }
         xms->dbg_fb_enabled = false;
@@ -196,7 +197,7 @@ void xenon_dbg_update_display(void *opaque)
         }
     }
 
-    if (xms->trace_boot &&
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_XGPU) &&
         (!xms->dbg_fb_enabled ||
          xms->dbg_fb_base != fb.base ||
          xms->dbg_fb_pitch != fb.pitch ||

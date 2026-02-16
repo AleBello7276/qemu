@@ -223,7 +223,7 @@ static uint64_t xenon_seceng_read(void *opaque, hwaddr offset, unsigned size)
     } else {
         address_space_read(&address_space_memory, pa, MEMTXATTRS_UNSPECIFIED, buf, size);
     }
-    if (xms && xms->trace_boot &&
+    if (xms && xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_NAND) &&
         pa >= XENON_NAND_BASE &&
         pa < (XENON_NAND_BASE + XENON_NAND_MMIO_SIZE) &&
         xms->nand_trace_reads < 32) {
@@ -241,7 +241,7 @@ static uint64_t xenon_seceng_read(void *opaque, hwaddr offset, unsigned size)
                   ea, (uint64_t)pa, size, v);
         xms->nand_trace_reads++;
     }
-    if (xms && xms->trace_boot &&
+    if (xms && xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_SOC) &&
         pa < 0x00100000 &&
         xms->soc_trace_reads < 96 &&
         pa != 0x61010) {
@@ -259,7 +259,7 @@ static uint64_t xenon_seceng_read(void *opaque, hwaddr offset, unsigned size)
                  ea, (uint64_t)pa, size, v);
         xms->soc_trace_reads++;
     }
-    if (xms && xms->trace_boot &&
+    if (xms && xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_SECENG) &&
         ((pa >= 0x00020000 && pa < 0x00024000) ||
          (pa >= 0x00061000 && pa < 0x00061200)) &&
         xms->secotp_trace_reads < 128) {
@@ -272,12 +272,12 @@ static uint64_t xenon_seceng_read(void *opaque, hwaddr offset, unsigned size)
         case 8: v = ldq_be_p(buf); break;
         default: break;
         }
-        info_report("xbox360: secotp/prv-read EA=0x%016" PRIx64
+        SECENG_INFO("secotp/prv-read EA=0x%016" PRIx64
                     " PA=0x%08" PRIx64 " size=%u val=0x%016" PRIx64,
                     ea, (uint64_t)pa, size, v);
         xms->secotp_trace_reads++;
     }
-    if (xms && xms->trace_boot &&
+    if (xms && xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_XGPU) &&
         pa >= XENON_XGPU_MMIO_BASE &&
         pa < (XENON_XGPU_MMIO_BASE + XENON_XGPU_MMIO_SIZE) &&
         xms->xgpu_trace_reads < 64) {
@@ -290,12 +290,12 @@ static uint64_t xenon_seceng_read(void *opaque, hwaddr offset, unsigned size)
         case 8: v = ldq_be_p(buf); break;
         default: break;
         }
-        info_report("xbox360: xgpu-mmio-read EA=0x%016" PRIx64
+        XGPU_INFO("xgpu-mmio-read EA=0x%016" PRIx64
                     " PA=0x%08" PRIx64 " size=%u val=0x%016" PRIx64,
                     ea, (uint64_t)pa, size, v);
         xms->xgpu_trace_reads++;
     }
-    if (xms && xms->trace_boot &&
+    if (xms && xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_SECENG) &&
         pa >= 0x00280000 && pa < 0x00280200 &&
         cd_buf_read_logs < 64) {
         uint64_t v = 0;
@@ -308,7 +308,7 @@ static uint64_t xenon_seceng_read(void *opaque, hwaddr offset, unsigned size)
         case 8: v = ldq_be_p(buf); break;
         default: break;
         }
-        info_report("xbox360: cd-buf-read EA=0x%016" PRIx64
+        SECENG_INFO("cd-buf-read EA=0x%016" PRIx64
                     " PA=0x%08" PRIx64
                     " size=%u val=0x%016" PRIx64
                     " NIP=0x%016" PRIx64,
@@ -430,57 +430,57 @@ static void xenon_seceng_write(void *opaque, hwaddr offset, uint64_t data, unsig
     } else {
         address_space_write(&address_space_memory, pa, MEMTXATTRS_UNSPECIFIED, buf, size);
     }
-    if (xms && xms->trace_boot &&
+    if (xms && xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_NAND) &&
         pa >= XENON_NAND_BASE &&
         pa < (XENON_NAND_BASE + XENON_NAND_MMIO_SIZE) &&
         xms->nand_trace_writes < 16) {
-        info_report("xbox360: nand-write EA=0x%016" PRIx64 " PA=0x%08" PRIx64
+        NAND_INFO("nand-write EA=0x%016" PRIx64 " PA=0x%08" PRIx64
                     " size=%u val=0x%016" PRIx64,
                     ea, (uint64_t)pa, size, data);
         xms->nand_trace_writes++;
     }
-    if (xms && xms->trace_boot &&
+    if (xms && xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_SOC) &&
         pa >= 0x00100000 &&
         pa < 0x00400000 &&
         xms->soc_trace_writes < 256) {
-        info_report("xbox360: stage-write EA=0x%016" PRIx64 " PA=0x%08" PRIx64
+        SOC_INFO("stage-write EA=0x%016" PRIx64 " PA=0x%08" PRIx64
                     " size=%u val=0x%016" PRIx64,
                     ea, (uint64_t)pa, size, data);
         xms->soc_trace_writes++;
-    } else if (xms && xms->trace_boot &&
+    } else if (xms && xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_SOC) &&
                pa < 0x00100000 &&
                pa != 0x61010 &&
                data != 0 &&
                xms->soc_trace_writes < 512) {
-        info_report("xbox360: soc-write-nz EA=0x%016" PRIx64 " PA=0x%08" PRIx64
+        SOC_INFO("soc-write-nz EA=0x%016" PRIx64 " PA=0x%08" PRIx64
                     " size=%u val=0x%016" PRIx64,
                     ea, (uint64_t)pa, size, data);
         xms->soc_trace_writes++;
     }
-    if (xms && xms->trace_boot &&
+    if (xms && xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_SECENG) &&
         ((pa >= 0x00020000 && pa < 0x00024000) ||
          (pa >= 0x00061000 && pa < 0x00061200)) &&
         xms->secotp_trace_writes < 128) {
-        info_report("xbox360: secotp/prv-write EA=0x%016" PRIx64
+        SECENG_INFO("secotp/prv-write EA=0x%016" PRIx64
                     " PA=0x%08" PRIx64 " size=%u val=0x%016" PRIx64,
                     ea, (uint64_t)pa, size, data);
         xms->secotp_trace_writes++;
     }
-    if (xms && xms->trace_boot &&
+    if (xms && xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_XGPU) &&
         pa >= XENON_XGPU_MMIO_BASE &&
         pa < (XENON_XGPU_MMIO_BASE + XENON_XGPU_MMIO_SIZE) &&
         xms->xgpu_trace_writes < 64) {
-        info_report("xbox360: xgpu-mmio-write EA=0x%016" PRIx64
+        XGPU_INFO("xgpu-mmio-write EA=0x%016" PRIx64
                     " PA=0x%08" PRIx64 " size=%u val=0x%016" PRIx64,
                     ea, (uint64_t)pa, size, data);
         xms->xgpu_trace_writes++;
     }
-    if (xms && xms->trace_boot &&
+    if (xms && xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_SECENG) &&
         pa >= 0x00280000 && pa < 0x00280200 &&
         cd_buf_write_logs < 128) {
         uint64_t nip = xms->boot_cpu ? (uint64_t)xms->boot_cpu->env.nip : 0;
 
-        info_report("xbox360: cd-buf-write EA=0x%016" PRIx64
+        SECENG_INFO("cd-buf-write EA=0x%016" PRIx64
                     " PA=0x%08" PRIx64
                     " size=%u val=0x%016" PRIx64
                     " NIP=0x%016" PRIx64,

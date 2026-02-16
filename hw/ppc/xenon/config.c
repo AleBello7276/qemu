@@ -317,7 +317,13 @@ bool xenon_toml_config_load(const char *path, XenonTomlConfig *cfg, Error **errp
                 error_setg(errp, "invalid TraceBoot at line %d", i + 1);
                 return false;
             }
-            cfg->trace_boot = b;
+            /*
+             * TraceBoot is deprecated. Setting TraceBoot=true now sets
+             * LogLevel=trace. TraceBoot=false is ignored (log_level stays as-is).
+             */
+            if (b && !cfg->log_level) {
+                cfg->log_level = g_strdup("trace");
+            }
             cfg->have_trace_boot = true;
         } else if ((sec == SEC_BOOT || sec == SEC_NONE) &&
                    !g_ascii_strcasecmp(key, "PrettyPost")) {

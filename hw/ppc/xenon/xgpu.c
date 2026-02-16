@@ -181,7 +181,7 @@ void xenon_xgpu_reset(XenonMachineState *xms)
         xenon_xgpu_store32(xms, XGPU_REG_MDLL_CNTL1, 0x19100000U);
     }
 
-    if (xms->trace_boot) {
+    if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_XGPU)) {
         XGPU_INFO("xgpu profile revision=%s devid=0x%04x revid=0x%02x",
                   xenon_console_revision_name(xms->console_revision),
                   device_id, rev_id);

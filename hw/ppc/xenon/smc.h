@@ -9,6 +9,7 @@
 
 #include "qemu/osdep.h"
 #include "hw/ppc/xenon/hana.h"
+#include "hw/ppc/xenon/debug.h"
 
 #define XENON_SMC_BASE 0xEA001000ULL
 #define XENON_SMC_SIZE 0x100ULL
@@ -34,14 +35,15 @@ typedef struct XenonSmcState {
     uint8_t power_on_reason;
     uint8_t avpack_type;
     uint8_t console_revision;
-    bool trace_boot;
+    XenonLogLevel log_level;
+    uint32_t log_module_mask;
     bool uart_stdio;
     bool uart_status_flip;
 } XenonSmcState;
 
 void xenon_smc_reset(XenonSmcState *smc, uint8_t power_on_reason, uint8_t avpack_type,
                      uint8_t console_revision, const char *uart_backend,
-                     bool trace_boot);
+                     XenonLogLevel log_level, uint32_t log_module_mask);
 uint64_t xenon_smc_read(XenonSmcState *smc, uint64_t offset, unsigned size);
 void xenon_smc_write(XenonSmcState *smc, uint64_t offset, uint64_t data, unsigned size);
 

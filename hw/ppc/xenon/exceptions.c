@@ -8,6 +8,7 @@
 #include "qemu/error-report.h"
 #include "hw/ppc/ppc.h"
 #include "hw/ppc/xenon/exceptions.h"
+#include "hw/ppc/xenon/debug.h"
 
 typedef struct XenonVectorMap {
     int excp;
@@ -74,7 +75,7 @@ void xenon_install_exception_profile(XenonMachineState *xms, CPUPPCState *env)
         env->tb_env->flags &= ~PPC_DECR_UNDERFLOW_LEVEL;
     }
 
-    if (xms && xms->trace_boot) {
+    if (xms && xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_BOOT)) {
         info_report("xbox360: installed xenon exception profile "
                     "(hreset=0x%04x ivpr=0x%016" PRIx64
                     " tb_flags 0x%08x -> 0x%08x)",

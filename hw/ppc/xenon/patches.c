@@ -84,7 +84,7 @@ static void xenon_apply_rgh2_patches(XenonMachineState *xms)
                                                    patches[i].insn);
         hwaddr pa = xenon_bootstrap_cia_to_pa(patches[i].cia);
 
-        if (xms->trace_boot) {
+        if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_PATCH)) {
             PATCH_INFO("rgh2 patch %s at CIA=0x%08" PRIx64
                        " PA=0x%08" PRIx64 " via=%s",
                        patches[i].name, patches[i].cia, (uint64_t)pa,
@@ -123,7 +123,7 @@ static void xenon_apply_cd_rgh1_patches(XenonMachineState *xms)
                                                    patches[i].insn);
         hwaddr pa = xenon_bootstrap_cia_to_pa(patches[i].cia);
 
-        if (xms->trace_boot) {
+        if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_PATCH)) {
             PATCH_INFO("cd-rgh1 patch %s at CIA=0x%08" PRIx64
                        " PA=0x%08" PRIx64 " via=%s",
                        patches[i].name, patches[i].cia, (uint64_t)pa,
@@ -167,7 +167,7 @@ void xenon_patches_on_post_write(XenonMachineState *xms, uint8_t post,
         }
         env->gpr[3] = 1;
         env->gpr[5] = 0;
-        if (xms->trace_boot) {
+        if (xenon_log_enabled(xms, XENON_LOG_LEVEL_INFO, XENON_LOG_MODULE_PATCH)) {
             PATCH_INFO("cd-sha-bypass post=0x49 force r3=1 r5=0"
                        " got_ea=0x%016" PRIx64 " exp_ea=0x%016" PRIx64
                        " rc(got)=%d rc(exp)=%d nip=0x%016" PRIx64
