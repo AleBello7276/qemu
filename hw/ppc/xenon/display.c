@@ -8,7 +8,7 @@
 #include "qemu/error-report.h"
 #include "qemu/units.h"
 #include "hw/ppc/xenon/xenon-internal.h"
-#include "hw/ppc/xenon/xgpu.h"
+#include "hw/ppc/xenon/gpu/xgpu.h"
 #include "hw/ppc/xenon/debug.h"
 #include "system/address-spaces.h"
 #include "ui/pixel_ops.h"

@@ -8,7 +8,7 @@
 #define HW_PPC_XENON_SMC_H
 
 #include "qemu/osdep.h"
-#include "hw/ppc/xenon/hana.h"
+#include "hw/ppc/xenon/devices/hana.h"
 #include "hw/ppc/xenon/debug.h"
 
 #define XENON_SMC_BASE 0xEA001000ULL

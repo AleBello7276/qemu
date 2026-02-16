@@ -91,23 +91,23 @@ ppc_ss.add(when: 'CONFIG_AMIGAONE', if_true: files('amigaone.c'))
 ppc_ss.add(when: 'CONFIG_PEGASOS', if_true: files('pegasos.c'))
 # Xbox 360 Xenon
 ppc_ss.add(when: 'CONFIG_XBOX360', if_true: files(
-  'xenon/ata.c',
   'xenon/boot.c',
   'xenon/config.c',
   'xenon/debug.c',
   'xenon/display.c',
   'xenon/exceptions.c',
-  'xenon/hana.c',
-  'xenon/iic.c',
   'xenon/machine.c',
   'xenon/mmio.c',
   'xenon/patches.c',
   'xenon/postcodes.c',
   'xenon/qom.c',
   'xenon/seceng.c',
-  'xenon/smc.c',
   'xenon/trace.c',
-  'xenon/xgpu.c',
+  'xenon/gpu/xgpu.c',
+  'xenon/devices/smc.c',
+  'xenon/devices/hana.c',
+  'xenon/devices/iic.c',
+  'xenon/devices/ata.c',
 ))
 
 ppc_ss.add(when: 'CONFIG_VOF', if_true: files('vof.c'))

@@ -9,7 +9,7 @@
 #include "exec/cpu-common.h"
 #include "hw/ppc/xenon/debug.h"
 #include "hw/ppc/xenon/xenon-internal.h"
-#include "hw/ppc/xenon/xgpu.h"
+#include "hw/ppc/xenon/gpu/xgpu.h"
 
 #define NAND_INFO(...) XENON_LOG_INFO(xms, XENON_LOG_MODULE_NAND, __VA_ARGS__)
 #define SOC_INFO(...)  XENON_LOG_INFO(xms, XENON_LOG_MODULE_SOC, __VA_ARGS__)
@@ -570,6 +570,14 @@ static void xenon_sfcx_write(void *opaque, hwaddr offset, uint64_t data, unsigne
     case XENON_SFCX_REG_COMMAND: {
         uint32_t addr = xenon_sfcx_pci_get32(xms, XENON_SFCX_REG_ADDRESS);
         uint32_t data_reg = xenon_sfcx_pci_get32(xms, XENON_SFCX_REG_DATA);
+        uint32_t data_phys = xenon_sfcx_pci_get32(xms, XENON_SFCX_REG_DATAPHYS);
+        uint32_t spare_phys = xenon_sfcx_pci_get32(xms, XENON_SFCX_REG_SPAREPHYS);
+        
+        /* Only log at high debug levels to avoid spam */
+        if (xms->log_level >= XENON_LOG_LEVEL_DEBUG && xms->log_module_mask & XENON_LOG_MODULE_SATA) {
+            fprintf(stderr, "xbox360: SFCX cmd=0x%02x addr=0x%08x data_phys=0x%08x spare_phys=0x%08x\n",
+                    val32 & 0xFFU, addr, data_phys, spare_phys);
+        }
 
         switch (val32 & 0xFFU) {
         case XENON_SFCX_CMD_PAGE_BUF_TO_REG:

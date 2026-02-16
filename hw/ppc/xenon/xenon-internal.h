@@ -8,9 +8,9 @@
 #define HW_PPC_XENON_INTERNAL_H
 
 #include "hw/boards.h"
-#include "hw/ppc/xenon/ata.h"
+#include "hw/ppc/xenon/devices/ata.h"
 #include "hw/ppc/xenon/debug.h"
-#include "hw/ppc/xenon/smc.h"
+#include "hw/ppc/xenon/devices/smc.h"
 #include "qemu/timer.h"
 #include "system/memory.h"
 #include "target/ppc/cpu.h"

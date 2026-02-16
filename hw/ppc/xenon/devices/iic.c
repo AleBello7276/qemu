@@ -7,7 +7,7 @@
 #include "qemu/osdep.h"
 #include "qemu/error-report.h"
 #include "hw/ppc/ppc.h"
-#include "hw/ppc/xenon/iic.h"
+#include "hw/ppc/xenon/devices/iic.h"
 #include "hw/ppc/xenon/debug.h"
 
 #define IIC_INFO(...) XENON_LOG_INFO(xms, XENON_LOG_MODULE_IIC, __VA_ARGS__)

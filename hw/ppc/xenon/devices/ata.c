@@ -7,7 +7,7 @@
 #include "qemu/osdep.h"
 #include "qemu/error-report.h"
 #include "exec/cpu-common.h"
-#include "hw/ppc/xenon/ata.h"
+#include "hw/ppc/xenon/devices/ata.h"
 #include "hw/ppc/xenon/xenon-internal.h"
 #include "hw/ppc/xenon/debug.h"
 
@@ -928,12 +928,12 @@ static uint8_t xenon_ata_read8(XenonAtaPort *p, hwaddr reg)
 }
 
 /*
- * Write a single 8-bit task-file/BMDMA/SATA register to a port.
+ * Write a single byte to an ATA register.
  *
  * Purpose: central register dispatch used by the MMIO write handler, including
  * command submission and soft-reset semantics.
  */
-static void xenon_ata_write8(XenonAtaPort *p, hwaddr reg, uint8_t val)
+static void xenon_ata_write8(XenonMachineState *xms, XenonAtaPort *p, hwaddr reg, uint8_t val)
 {
     switch (reg) {
     case XENON_ATA_REG_FEATURES:
@@ -1120,7 +1120,7 @@ static void xenon_sata_write(void *opaque, hwaddr offset, uint64_t data, unsigne
     }
 
     for (unsigned i = 0; i < size; i++) {
-        xenon_ata_write8(p, reg + i, tmp[i]);
+        xenon_ata_write8(xms, p, reg + i, tmp[i]);
     }
 }
 

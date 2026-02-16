@@ -5,7 +5,7 @@
  */
 
 #include "qemu/osdep.h"
-#include "hw/ppc/xenon/hana.h"
+#include "hw/ppc/xenon/devices/hana.h"
 
 /*
  * Baseline ANA/HANA register images mirrored from xenon-emu to keep

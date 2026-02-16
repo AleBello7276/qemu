@@ -11,8 +11,8 @@
 #include "hw/ppc/xenon/debug.h"
 #include "hw/ppc/xenon/machine-priv.h"
 #include "hw/ppc/xenon/postcodes.h"
-#include "hw/ppc/xenon/iic.h"
-#include "hw/ppc/xenon/xgpu.h"
+#include "hw/ppc/xenon/devices/iic.h"
+#include "hw/ppc/xenon/gpu/xgpu.h"
 #include "target/ppc/spr_common.h"
 #include "target/ppc/mmu-hash64.h"
 

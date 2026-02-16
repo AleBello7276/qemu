@@ -7,7 +7,7 @@
 #include "qemu/osdep.h"
 #include "qemu/error-report.h"
 #include "hw/ppc/xenon/debug.h"
-#include "hw/ppc/xenon/xgpu.h"
+#include "hw/ppc/xenon/gpu/xgpu.h"
 
 #define XGPU_INFO(...) XENON_LOG_INFO(xms, XENON_LOG_MODULE_XGPU, __VA_ARGS__)
 

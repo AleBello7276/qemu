@@ -7,8 +7,8 @@
 #include "qemu/osdep.h"
 #include "qemu/bswap.h"
 #include "qemu/error-report.h"
-#include "hw/ppc/xenon/hana.h"
-#include "hw/ppc/xenon/smc.h"
+#include "hw/ppc/xenon/devices/hana.h"
+#include "hw/ppc/xenon/devices/smc.h"
 #include "hw/ppc/xenon/debug.h"
 
 #define UART_BYTE_OUT_REG   0x10
